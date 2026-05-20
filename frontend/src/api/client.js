@@ -6,7 +6,7 @@
  *   2. '/api'                — relative, works through Vite dev-server proxy
  *                              and any reverse-proxy in production
  *
- * Do NOT hardcode 'http://localhost:5000/api' here.
+ * Do NOT hardcode 'http://localhost:3010/api' here.
  * That bypasses the Vite proxy, breaks cross-origin preflight in some
  * environments, and silently fails in production.
  */

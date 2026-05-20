@@ -34,8 +34,8 @@ if not exist "%FRONTEND%\node_modules\vite\bin\vite.js" (
 )
 
 :: ── Launch backend in new window ───────────────────────────────────────────────
-echo  [1/2] Starting Backend  ^(http://localhost:5000^)
-start "SHP Backend  :5000" cmd /c "cd /d "%BACKEND%" && call venv\Scripts\activate.bat && set "FLASK_APP=run.py" && set "FLASK_ENV=development" && python run.py & pause"
+echo  [1/2] Starting Backend  ^(http://localhost:3010^)
+start "SHP Backend  :3010" cmd /c "cd /d "%BACKEND%" && call venv\Scripts\activate.bat && set "FLASK_APP=run.py" && set "FLASK_ENV=development" && python run.py & pause"
 
 :: ── Wait for Flask to bind before opening browser ─────────────────────────────
 timeout /t 3 /nobreak > nul

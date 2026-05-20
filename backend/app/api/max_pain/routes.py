@@ -374,7 +374,7 @@ def debug_snapshots():
       all distinct thresholds present, sample IDs.
 
     Usage:
-        curl http://localhost:5000/api/max-pain/debug/snapshots
+        curl http://localhost:3010/api/max-pain/debug/snapshots
     """
     import re
     import os as _os

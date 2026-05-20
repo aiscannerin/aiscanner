@@ -68,7 +68,7 @@ start.bat
 ```
 
 Opens two console windows:
-- **Backend** on http://localhost:5000
+- **Backend** on http://localhost:3010
 - **Frontend** on http://localhost:3000
 
 ---
@@ -111,7 +111,7 @@ cd frontend
 # Install dependencies
 npm install
 
-# Start Vite dev server (proxies /api to localhost:5000)
+# Start Vite dev server (proxies /api to localhost:3010)
 npm run dev
 ```
 
@@ -216,7 +216,7 @@ Tests use an in-memory SQLite database — no PostgreSQL or Redis required.
 
 | Service | Port | Notes |
 |---------|------|-------|
-| Flask backend | 5000 | `python run.py` |
+| Flask backend | 3010 | `python run.py` |
 | Vite frontend | 3000 | `npm run dev` |
 | PostgreSQL | 5432 | default |
 | Redis | 6379 | default |

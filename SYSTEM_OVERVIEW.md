@@ -30,7 +30,7 @@ Browser (React 18 / Vite)
     |
     | HTTP/JSON  (JWT Bearer token in every request)
     |
-Flask API (port 5000)
+Flask API (port 3010)
     |         |
     |         +-- PostgreSQL (primary data store)
     |         |
@@ -424,7 +424,7 @@ No Redux or Zustand. State is managed via:
 
 ### Vite proxy
 
-In development, Vite proxies `/api/*` to `http://localhost:5000` so there are no CORS issues during development. In production, configure a real reverse proxy (nginx/Caddy) to do the same.
+In development, Vite proxies `/api/*` to `http://localhost:3010` so there are no CORS issues during development. In production, configure a real reverse proxy (nginx/Caddy) to do the same.
 
 ### Key pages
 
@@ -501,7 +501,7 @@ These require no JWT and are intended for development/diagnosis:
 
 **Example: check if snapshot fallback is configured correctly:**
 ```
-curl http://localhost:5000/api/max-pain/debug/snapshots
+curl http://localhost:3010/api/max-pain/debug/snapshots
 ```
 
 ---

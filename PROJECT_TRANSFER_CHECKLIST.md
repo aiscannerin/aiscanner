@@ -153,14 +153,14 @@ venv\Scripts\python run.py
 
 Expected output:
 ```
-* Running on http://127.0.0.1:5000
+* Running on http://127.0.0.1:3010
 * Debug mode: on
 ```
 
 ### Health check
 
 ```
-curl http://localhost:5000/api/health
+curl http://localhost:3010/api/health
 ```
 
 Expected: `{"status": "ok"}`
@@ -199,7 +199,7 @@ Local:   http://localhost:3000/
 
 ### Snapshot fallback
 
-- [ ] Run: `curl http://localhost:5000/api/max-pain/debug/snapshots`
+- [ ] Run: `curl http://localhost:3010/api/max-pain/debug/snapshots`
 - [ ] Confirm `total_snapshots` > 0
 - [ ] During market hours: scan shows live data
 - [ ] Outside market hours: scan shows snapshot banner
@@ -226,7 +226,7 @@ Local:   http://localhost:3000/
 - [ ] Set `DASHBOARD_URL` to the production frontend URL
 - [ ] Use `gunicorn` instead of Flask dev server:
   ```bash
-  gunicorn -w 4 -b 0.0.0.0:5000 "app:create_app()"
+  gunicorn -w 4 -b 0.0.0.0:3010 "app:create_app()"
   ```
 - [ ] Set up a process manager (systemd, supervisor, PM2) for Flask, Celery worker, and Celery beat
 
@@ -291,7 +291,7 @@ Local:   http://localhost:3000/
 
 | Port | Service |
 |------|---------|
-| 5000 | Flask backend |
+| 3010 | Flask backend |
 | 3000 | Vite dev server (frontend) |
 | 5432 | PostgreSQL |
 | 6379 | Redis |
