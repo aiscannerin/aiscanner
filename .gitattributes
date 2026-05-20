@@ -1,0 +1,28 @@
+# Force LF line endings in the repository for all text files.
+# Windows users get CRLF on checkout (autocrlf), Linux/Mac get LF.
+* text=auto
+
+# Explicitly LF for these file types
+*.py   text eol=lf
+*.js   text eol=lf
+*.jsx  text eol=lf
+*.ts   text eol=lf
+*.tsx  text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.sh   text eol=lf
+*.env.example text eol=lf
+*.txt  text eol=lf
+*.cfg  text eol=lf
+*.ini  text eol=lf
+*.toml text eol=lf
+*.bat  text eol=crlf
+
+# Binary - no conversion
+*.png  binary
+*.jpg  binary
+*.ico  binary
+*.woff binary
+*.woff2 binary

@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base resets ────────────────────────────────────────────────────────────── */
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: #050810;
+    color: #e1e2ee;
+    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar        { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track  { background: #0b0e16; }
+  ::-webkit-scrollbar-thumb  { background: #424656; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #8c90a1; }
+
+  /* Selection */
+  ::selection {
+    background: rgba(179, 197, 255, 0.18);
+    color: #e1e2ee;
+  }
+}
+
+/* ── Utility classes ────────────────────────────────────────────────────────── */
+@layer utilities {
+  /* Glass card surface */
+  .glass {
+    background: rgba(10, 15, 30, 0.72);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  /* Heavier glass for modals/overlays */
+  .glass-lg {
+    background: rgba(10, 15, 30, 0.88);
+    backdrop-filter: blur(40px);
+    -webkit-backdrop-filter: blur(40px);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+  }
+
+  /* Gradient text */
+  .text-gradient-primary {
+    background: linear-gradient(135deg, #b3c5ff 0%, #00f1fe 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Neon border glow on hover */
+  .border-glow-primary:hover {
+    border-color: rgba(179, 197, 255, 0.35);
+    box-shadow: 0 0 16px rgba(179, 197, 255, 0.12);
+  }
+
+  /* Reduced-motion overrides */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

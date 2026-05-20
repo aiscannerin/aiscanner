@@ -1,0 +1,108 @@
+# ── Python ─────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.installed.cfg
+MANIFEST
+
+# ── Virtual environment ─────────────────────────────────────────────────────────
+backend/venv/
+backend/.venv/
+venv/
+.venv/
+env/
+ENV/
+
+# ── Secrets & environment files ─────────────────────────────────────────────────
+.env
+.env.local
+.env.production
+.env.staging
+backend/.env
+frontend/.env
+frontend/.env.local
+frontend/.env.production
+# Keep .env.example files — they are safe and required
+!.env.example
+!backend/.env.example
+!frontend/.env.example
+
+# ── Testing & coverage ──────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+
+# ── Flask / SQLAlchemy ──────────────────────────────────────────────────────────
+instance/
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Node / Frontend ─────────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+frontend/.cache/
+node_modules/
+
+# ── Vite ────────────────────────────────────────────────────────────────────────
+*.local
+
+# ── Logs ────────────────────────────────────────────────────────────────────────
+*.log
+flask_out.txt
+backend/flask_out.txt
+celery*.log
+
+# ── Debug dumps ─────────────────────────────────────────────────────────────────
+backend/debug/
+debug/
+*.dump
+
+# ── IDE / OS ────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── PyInstaller ─────────────────────────────────────────────────────────────────
+*.spec
+backend/build/
+backend/dist/
+
+# ── Celery ──────────────────────────────────────────────────────────────────────
+celerybeat-schedule
+celerybeat.pid
+
+# ── Alembic ─────────────────────────────────────────────────────────────────────
+# Keep all migration files — they are version controlled
+# Exclude only generated cache
+backend/migrations/versions/__pycache__/
+
+# ── Claude Code local config (machine-specific, not for repo) ──────────────────
+.claude/
+
+# ── Data files that should not be committed ──────────────────────────────────────
+backend/data/*.csv
+backend/data/*.json
+backend/data/*.pkl
+backend/data/**/*.csv
+backend/data/**/*.json
+backend/data/**/*.pkl
+
+# ── Temporary files ──────────────────────────────────────────────────────────────
+*.tmp
+*.bak
+*.orig
+*.pid
