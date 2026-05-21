@@ -60,7 +60,12 @@ node_modules/
 *.log
 flask_out.txt
 backend/flask_out.txt
+backend/flask_test_out.txt
 celery*.log
+update.log
+# Keep log directories tracked (via .gitkeep) but ignore log content
+!backend/logs/.gitkeep
+!frontend/logs/.gitkeep
 
 # ── Debug dumps ─────────────────────────────────────────────────────────────────
 backend/debug/
