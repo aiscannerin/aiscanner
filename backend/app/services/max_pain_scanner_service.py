@@ -365,7 +365,7 @@ def run_scanner(
         "effective_workers":  effective_workers,
     }
 
-    summary = _build_summary(
+    summary = build_summary(
         results,
         len(target),
         total_errors=len(errors),
@@ -383,7 +383,7 @@ def run_scanner(
     }
 
 
-def _build_summary(
+def build_summary(
     results: list[dict],
     total_scanned: int,
     total_errors: int = 0,

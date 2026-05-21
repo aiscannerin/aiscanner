@@ -17,6 +17,7 @@ from app.services.scan_snapshot_service import (
 from app.services.max_pain_scanner_service import (
     run_scanner,
     scan_symbol,
+    build_summary,
     _scan_symbol_internal,
     DEFAULT_FO_UNIVERSE,
 )
@@ -60,53 +61,76 @@ def scan():
             else None
         )
 
+        symbol_count = len(symbols) if symbols else len(DEFAULT_FO_UNIVERSE)
+
         logger.info(
             "[SCAN /scan] threshold=%.1f%% symbols=%s expiry=%s",
             threshold,
-            symbols or f"default({len(DEFAULT_FO_UNIVERSE)})",
+            symbols or f"default({symbol_count})",
             expiry or "nearest",
         )
 
-        result = run_scanner(
+        # ── Always scan at threshold=0 internally ───────────────────────────
+        # This ensures the snapshot always captures the FULL live universe.
+        # The user's threshold is applied in Python afterward — no extra NSE
+        # calls, just a list filter.  This fixes the "only 3 results in
+        # snapshot" problem where snapshots saved at threshold=2 only kept
+        # the 3 stocks that happened to be above 2% at capture time.
+        result_full = run_scanner(
             symbols=symbols,
-            threshold_pct=threshold,
+            threshold_pct=0.0,      # always fetch everything
             expiry=expiry,
             max_workers=6,
         )
 
-        metrics = result.get("metrics", {})
-        logger.info(
-            "[SCAN /scan] done — hits=%d errors=%d below_threshold=%d "
-            "market_closed=%d fetch_success=%d avg_fetch_ms=%.0f",
-            len(result["results"]),
-            len(result["errors"]),
-            len(result.get("below_threshold", [])),
-            len(result.get("market_closed", [])),
-            metrics.get("fetch_success", 0),
-            metrics.get("avg_fetch_ms", 0),
-        )
-
-        live_results        = result.get("results", [])
-        market_closed_list  = result.get("market_closed", [])
+        metrics = result_full.get("metrics", {})
+        all_live            = result_full.get("results", [])       # all symbols with live data
+        market_closed_list  = result_full.get("market_closed", [])
         market_closed_count = len(market_closed_list)
-        has_live_data       = len(live_results) > 0
+        has_live_data       = len(all_live) > 0
 
-        logger.info(
-            "[SCAN /scan] fallback-check — has_live_data=%s live=%d "
-            "market_closed=%d errors=%d threshold=%.2f",
-            has_live_data, len(live_results), market_closed_count,
-            len(result.get("errors", [])), threshold,
+        # ── Apply user's threshold filter in Python ──────────────────────────
+        live_results      = [r for r in all_live if r.get("distance_pct", 0) >= threshold]
+        below_from_filter = [r["symbol"] for r in all_live if r.get("distance_pct", 0) < threshold]
+        full_below        = result_full.get("below_threshold", []) + below_from_filter
+
+        # Rebuild metrics & summary to reflect the filtered counts
+        metrics_out = {
+            **metrics,
+            "returned_results":   len(live_results),
+            "threshold_filtered": len(full_below),
+        }
+        summary_out = build_summary(
+            live_results,
+            total_scanned         = symbol_count,
+            total_errors          = len(result_full.get("errors", [])),
+            total_below_threshold = len(full_below),
+            total_market_closed   = market_closed_count,
         )
 
-        # ── Persist successful scan ──────────────────────────────────────────
-        if has_live_data:
-            save_scan_snapshot(result, threshold=threshold)
+        logger.info(
+            "[SCAN /scan] live scan done — fetched=%d threshold_pass=%d "
+            "below=%d errors=%d market_closed=%d",
+            len(all_live), len(live_results), len(full_below),
+            len(result_full.get("errors", [])), market_closed_count,
+        )
 
-        # ── Snapshot fallback — any time there are no live results ─────────────
-        # Deliberately does NOT require market_closed_count > 0:
-        # NSE can return errors (timeouts, TLS failures) instead of explicit
-        # market-closed signals, so we fall back to the latest snapshot
-        # whenever live data is absent for any reason.
+        # ── Persist snapshot with ALL live results (threshold=0) ─────────────
+        # Saving at threshold=0 means the snapshot has the full picture.
+        # Future fallback loads can then apply any threshold filter they need.
+        if has_live_data:
+            save_scan_snapshot(result_full, threshold=0.0)
+
+        # Build the live response payload
+        result = {
+            **result_full,
+            "results":         live_results,
+            "below_threshold": full_below,
+            "summary":         summary_out,
+            "metrics":         metrics_out,
+        }
+
+        # ── Snapshot fallback — when live data is absent for any reason ───────
         using_snapshot   = False
         snapshot_age_min = None
         snapshot_created = None
@@ -115,43 +139,60 @@ def scan():
         if not has_live_data:
             if market_closed_count > 0:
                 fallback_reason = f"market_closed({market_closed_count})"
-            elif len(result.get("errors", [])) > 0:
-                fallback_reason = f"nse_errors({len(result.get('errors', []))})"
+            elif len(result_full.get("errors", [])) > 0:
+                fallback_reason = f"nse_errors({len(result_full.get('errors', []))})"
             else:
                 fallback_reason = "no_results"
 
             logger.info(
-                "[SCAN /scan] no live data (reason=%s) — "
-                "attempting snapshot fallback (threshold=%.2f)",
-                fallback_reason, threshold,
+                "[SCAN /scan] no live data (reason=%s) — attempting snapshot fallback",
+                fallback_reason,
             )
-            # get_latest_snapshot does its own two-step lookup internally:
-            # 1) approx threshold match, 2) any-threshold fallback
-            snapshot = get_latest_snapshot(threshold=threshold)
+
+            # Always fetch the newest snapshot regardless of threshold —
+            # we apply the threshold filter ourselves below.
+            snapshot = get_latest_snapshot(threshold=None)
 
             if snapshot is not None:
                 payload = load_snapshot_payload(snapshot)
                 if payload is not None:
-                    result           = payload
+                    # Apply threshold filter to snapshot data
+                    snap_all      = payload.get("results", [])
+                    snap_filtered = [r for r in snap_all if r.get("distance_pct", 0) >= threshold]
+                    snap_below    = payload.get("below_threshold", []) + [
+                        r["symbol"] for r in snap_all if r.get("distance_pct", 0) < threshold
+                    ]
+                    snap_summary  = build_summary(
+                        snap_filtered,
+                        total_scanned         = symbol_count,
+                        total_errors          = len(payload.get("errors", [])),
+                        total_below_threshold = len(snap_below),
+                        total_market_closed   = len(payload.get("market_closed", [])),
+                    )
+                    result = {
+                        **payload,
+                        "results":         snap_filtered,
+                        "below_threshold": snap_below,
+                        "summary":         snap_summary,
+                    }
                     using_snapshot   = True
                     snapshot_age_min = round(snapshot.age_minutes(), 1)
                     snapshot_created = snapshot.created_at.isoformat()
                     logger.info(
                         "[SCAN /scan] SNAPSHOT ACTIVE id=%s age=%.1fmin "
-                        "results=%d reason=%s",
+                        "total_in_snap=%d after_threshold_filter=%d reason=%s",
                         str(snapshot.id)[:8], snapshot_age_min,
-                        len(payload.get("results", [])), fallback_reason,
+                        len(snap_all), len(snap_filtered), fallback_reason,
                     )
                 else:
                     logger.warning(
-                        "[SCAN /scan] snapshot id=%s found but payload "
-                        "decode failed — frontend will show empty state",
+                        "[SCAN /scan] snapshot id=%s found but payload decode failed",
                         str(snapshot.id)[:8],
                     )
             else:
                 logger.info(
-                    "[SCAN /scan] no snapshot found (reason=%s) — "
-                    "frontend will show 'no snapshot available' message",
+                    "[SCAN /scan] no snapshot in DB yet (reason=%s) — "
+                    "frontend will show empty state",
                     fallback_reason,
                 )
 
@@ -165,10 +206,10 @@ def scan():
             "snapshot_created_at":      snapshot_created,
             "snapshot_fallback_reason": fallback_reason,
             "meta": {
-                "threshold_pct":       threshold,
-                "symbols_requested":   len(symbols) if symbols else len(DEFAULT_FO_UNIVERSE),
-                "generated_at":        datetime.now(timezone.utc).isoformat(),
-                "metrics":             metrics,
+                "threshold_pct":     threshold,
+                "symbols_requested": symbol_count,
+                "generated_at":      datetime.now(timezone.utc).isoformat(),
+                "metrics":           metrics_out,
             },
         }), 200
 
