@@ -31,7 +31,11 @@ frontend/.env.production
 # Keep .env.example files — they are safe and required
 !.env.example
 !backend/.env.example
+!backend/.env.local.example
+!backend/.env.server.example
 !frontend/.env.example
+!frontend/.env.local.example
+!frontend/.env.server.example
 
 # ── Testing & coverage ──────────────────────────────────────────────────────────
 .pytest_cache/
