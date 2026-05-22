@@ -93,9 +93,9 @@ echo        Logs: %FRONTEND_DIR%\logs\frontend.log
 ::  /D sets working dir so relative paths inside the command work correctly.
 ::  Output is appended to logs\backend.log (both stdout and stderr).
 echo  [3/5] Starting backend  (http://localhost:%PORT_BACKEND%)...
-start "SHP-Backend-3010" /D "%BACKEND_DIR%" /MIN cmd /c ^
-    "call venv\Scripts\activate.bat && python run.py >> logs\backend.log 2>&1"
-echo        Backend window started (minimized).
+start "SHP-Backend-3010" /D "%BACKEND_DIR%" cmd /k ^
+    "call venv\Scripts\activate.bat && python run.py"
+echo        Backend window started.
 
 :: ── Wait for Flask to bind ───────────────────────────────────────────────────
 echo  [4/5] Waiting for backend to bind...
@@ -113,9 +113,9 @@ if "!BACKEND_UP!"=="0" (
 
 :: ── Start frontend ────────────────────────────────────────────────────────────
 echo  [5/5] Starting frontend (http://localhost:%PORT_FRONTEND%)...
-start "SHP-Frontend-3000" /D "%FRONTEND_DIR%" /MIN cmd /c ^
-    "node node_modules\vite\bin\vite.js >> logs\frontend.log 2>&1"
-echo        Frontend window started (minimized).
+start "SHP-Frontend-3000" /D "%FRONTEND_DIR%" cmd /k ^
+    "node node_modules\vite\bin\vite.js"
+echo        Frontend window started.
 
 echo.
 echo  ============================================================
