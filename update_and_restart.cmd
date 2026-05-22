@@ -117,7 +117,7 @@ if "!OLD_HEAD!"=="!NEW_HEAD!" (
     echo         No new commits pulled. Already up to date.
     echo  [INFO] No new commits >> "%LOGFILE%"
 ) else (
-    echo         Updated: !OLD_HEAD:~0,7! → !NEW_HEAD:~0,7!
+    echo         Updated: !OLD_HEAD:~0,7! -^> !NEW_HEAD:~0,7!
     echo  Updated: !OLD_HEAD:~0,7! to !NEW_HEAD:~0,7! >> "%LOGFILE%"
 )
 
@@ -218,7 +218,7 @@ echo   Finished : %DATE% %TIME%
 if "!OLD_HEAD!"=="!NEW_HEAD!" (
     echo   Commits  : No new commits ^(already up to date^)
 ) else (
-    echo   Commits  : !OLD_HEAD:~0,7! → !NEW_HEAD:~0,7!
+    echo   Commits  : !OLD_HEAD:~0,7! -^> !NEW_HEAD:~0,7!
 )
 echo   Backend  : http://localhost:3010
 echo   Frontend : http://localhost:3000
