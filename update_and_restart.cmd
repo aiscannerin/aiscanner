@@ -1,6 +1,6 @@
 @echo off
 :: ============================================================
-::  update_and_restart.cmd  —  Stop Hunter Pro
+::  update_and_restart.cmd  -  Stop Hunter Pro
 ::  One-command production update script.
 ::
 ::  What it does (in order):
@@ -9,7 +9,7 @@
 ::    3. Aborts and restarts old version if pull fails
 ::    4. pip install ONLY if backend\requirements.txt changed
 ::    5. npm install ONLY if frontend\package-lock.json changed
-::    6. flask db upgrade  (always — idempotent)
+::    6. flask db upgrade  (always - idempotent)
 ::    7. Restarts servers
 ::    8. Prints a summary with timestamps
 ::
@@ -34,7 +34,7 @@ set "START_TIME=%TIME%"
 
 echo.
 echo  ============================================================
-echo   Stop Hunter Pro — Update and Restart
+echo   Stop Hunter Pro - Update and Restart
 echo  ============================================================
 echo   Project : %PROJECT_DIR%
 echo   Started : %DATE% %START_TIME%
@@ -105,7 +105,7 @@ if !PULL_EXIT! NEQ 0 (
     echo          The server has NOT been updated.
     echo          Restarting the previous version now...
     echo.
-    echo  [FATAL] git pull failed (exit !PULL_EXIT!) — restarting old version >> "%LOGFILE%"
+    echo  [FATAL] git pull failed (exit !PULL_EXIT!) - restarting old version >> "%LOGFILE%"
     goto :ABORT_AND_RESTART
 )
 
@@ -127,15 +127,15 @@ echo  [Step 3] Checking requirements.txt >> "%LOGFILE%"
 
 :: If OLD_HEAD == NEW_HEAD, skip (nothing changed)
 if "!OLD_HEAD!"=="!NEW_HEAD!" (
-    echo         requirements.txt unchanged — skipping pip install.
+    echo         requirements.txt unchanged - skipping pip install.
     echo  [Step 3] Skipped (no new commits) >> "%LOGFILE%"
     goto :SKIP_PIP
 )
 
 git diff --quiet "!OLD_HEAD!" "!NEW_HEAD!" -- backend/requirements.txt >nul 2>&1
 if !ERRORLEVEL! EQU 1 (
-    echo         requirements.txt changed — running pip install...
-    echo  [Step 3] requirements.txt changed — pip install >> "%LOGFILE%"
+    echo         requirements.txt changed - running pip install...
+    echo  [Step 3] requirements.txt changed - pip install >> "%LOGFILE%"
     cd /d "%BACKEND_DIR%"
     call venv\Scripts\pip.exe install -r requirements.txt >> "%LOGFILE%" 2>&1
     if !ERRORLEVEL! NEQ 0 (
@@ -147,7 +147,7 @@ if !ERRORLEVEL! EQU 1 (
     )
     cd /d "%PROJECT_DIR%"
 ) else (
-    echo         requirements.txt unchanged — skipping pip install.
+    echo         requirements.txt unchanged - skipping pip install.
     echo  [Step 3] Skipped (no change) >> "%LOGFILE%"
 )
 :SKIP_PIP
@@ -157,15 +157,15 @@ echo  [Step 4/6] Checking frontend dependencies...
 echo  [Step 4] Checking package-lock.json >> "%LOGFILE%"
 
 if "!OLD_HEAD!"=="!NEW_HEAD!" (
-    echo         package-lock.json unchanged — skipping npm install.
+    echo         package-lock.json unchanged - skipping npm install.
     echo  [Step 4] Skipped (no new commits) >> "%LOGFILE%"
     goto :SKIP_NPM
 )
 
 git diff --quiet "!OLD_HEAD!" "!NEW_HEAD!" -- frontend/package-lock.json >nul 2>&1
 if !ERRORLEVEL! EQU 1 (
-    echo         package-lock.json changed — running npm install...
-    echo  [Step 4] package-lock.json changed — npm install >> "%LOGFILE%"
+    echo         package-lock.json changed - running npm install...
+    echo  [Step 4] package-lock.json changed - npm install >> "%LOGFILE%"
     cd /d "%FRONTEND_DIR%"
     npm install >> "%LOGFILE%" 2>&1
     if !ERRORLEVEL! NEQ 0 (
@@ -177,7 +177,7 @@ if !ERRORLEVEL! EQU 1 (
     )
     cd /d "%PROJECT_DIR%"
 ) else (
-    echo         package-lock.json unchanged — skipping npm install.
+    echo         package-lock.json unchanged - skipping npm install.
     echo  [Step 4] Skipped (no change) >> "%LOGFILE%"
 )
 :SKIP_NPM
@@ -235,7 +235,7 @@ exit /b 0
 :ABORT_AND_RESTART
 echo.
 echo  ============================================================
-echo   Update FAILED — Restarting previous version
+echo   Update FAILED - Restarting previous version
 echo  ============================================================
 echo.
 call "%PROJECT_DIR%\start_servers.cmd"

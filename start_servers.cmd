@@ -1,6 +1,6 @@
 @echo off
 :: ============================================================
-::  start_servers.cmd  —  Stop Hunter Pro
+::  start_servers.cmd  -  Stop Hunter Pro
 ::  Starts backend (port 3010) and frontend (port 3000) in
 ::  separate minimized console windows with log capture.
 ::
@@ -75,7 +75,7 @@ echo  [2/5] Preparing log directories...
 if not exist "%BACKEND_DIR%\logs"  mkdir "%BACKEND_DIR%\logs"
 if not exist "%FRONTEND_DIR%\logs" mkdir "%FRONTEND_DIR%\logs"
 
-:: Write session header to logs (append mode — keeps history across restarts)
+:: Write session header to logs (append mode - keeps history across restarts)
 echo. >> "%BACKEND_DIR%\logs\backend.log"
 echo ============================================================ >> "%BACKEND_DIR%\logs\backend.log"
 echo  Session started: %DATE% %TIME% >> "%BACKEND_DIR%\logs\backend.log"
@@ -119,7 +119,7 @@ echo        Frontend window started.
 
 echo.
 echo  ============================================================
-echo   Stop Hunter Pro — Running
+echo   Stop Hunter Pro - Running
 echo  ============================================================
 echo   Backend  : http://localhost:%PORT_BACKEND%
 echo   Frontend : http://localhost:%PORT_FRONTEND%

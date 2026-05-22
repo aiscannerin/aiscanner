@@ -1,11 +1,11 @@
 @echo off
 :: ============================================================
-::  stop_servers.cmd  —  Stop Hunter Pro
+::  stop_servers.cmd  -  Stop Hunter Pro
 ::  Safely stops backend (port 3010) and frontend (port 3000).
 ::
 ::  Strategy (two-pass):
-::    Pass 1 — kill by port (the actual Flask / Node processes)
-::    Pass 2 — kill by window title (cleanup orphaned cmd wrappers)
+::    Pass 1 - kill by port (the actual Flask / Node processes)
+::    Pass 2 - kill by window title (cleanup orphaned cmd wrappers)
 ::
 ::  Only kills processes bound to OUR ports.
 ::  Does NOT kill unrelated Python/Node/system services.
