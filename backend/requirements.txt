@@ -41,8 +41,10 @@ python-dotenv==1.2.2
 itsdangerous==2.2.0
 
 # -- HTTP & NSE Data Fetching --------------------------------------------------
-# curl_cffi: Required for NSE TLS fingerprinting (impersonate Chrome 124)
-# Standard requests/httpx are rejected by NSE with 403.
+# playwright: Headless Chromium for NSE option-chain (bypasses Akamai Bot Manager).
+# After pip install, run once: playwright install chromium
+playwright>=1.44.0
+# curl_cffi: Kept for Dhan API and other direct HTTP calls
 requests==2.33.0
 curl_cffi==0.13.0
 httpx==0.28.1

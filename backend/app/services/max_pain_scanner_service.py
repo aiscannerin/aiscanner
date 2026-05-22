@@ -2,27 +2,23 @@
 Max Pain Deviation Scanner Service
 ====================================
 Orchestrates option-chain fetching, max pain calculation, and deviation
-scanning across multiple symbols concurrently.
+scanning across multiple symbols.
 
-Uses the typed OptionChainResult / MaxPainResult APIs — no dict munging.
+Data source: NSE option chain via headless Chromium (nse_playwright_service).
+No per-user credentials required — the shared browser fetches for everyone.
 """
 
 from __future__ import annotations
 
 import logging
-import random
 import time
-import concurrent.futures
 from typing import Optional
 
 from app.services.nse_option_chain_service import (
     OptionChainResult,
     NSEMarketClosedError,
 )
-from app.services.dhan_option_chain_service import (
-    get_option_chain as dhan_get_option_chain,
-    DhanCredentialError,
-)
+from app.services import nse_playwright_service as nse_pw
 from app.services.max_pain_engine import (
     MaxPainResult,
     calculate_max_pain,
@@ -49,12 +45,10 @@ DEFAULT_FO_UNIVERSE: list[str] = [
     "HAVELLS", "VOLTAS", "DABUR", "MARICO", "COLPAL",
 ]
 
-# ---------------------------------------------------------------------------
-# OI buildup zones
-# ---------------------------------------------------------------------------
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _oi_buildup_zones(chain: OptionChainResult, top_n: int = 5) -> dict:
-    """Top-N CE (resistance) and PE (support) OI zones by strike."""
     spot = chain.spot_price
     above = sorted(
         [s for s in chain.strikes if s.strike > spot],
@@ -88,41 +82,26 @@ def _oi_bias(ce_wall_oi: int, pe_wall_oi: int) -> str:
     return "neutral"
 
 
-# ---------------------------------------------------------------------------
-# Single symbol scan — returns (result_dict | None, skip_reason | None, error | None)
-# ---------------------------------------------------------------------------
+# ── Single-symbol scan ────────────────────────────────────────────────────────
 
-_SKIP_BELOW_THRESHOLD  = "below_threshold"
-_SKIP_EMPTY_CHAIN      = "empty_chain"
-_SKIP_MARKET_CLOSED    = "market_closed"
+_SKIP_BELOW_THRESHOLD = "below_threshold"
+_SKIP_EMPTY_CHAIN     = "empty_chain"
+_SKIP_MARKET_CLOSED   = "market_closed"
 
 
 def _scan_symbol_internal(
     symbol: str,
-    client_id: str,
-    access_token: str,
     expiry: Optional[str] = None,
     threshold_pct: float  = 2.0,
 ) -> tuple[Optional[dict], Optional[str], Optional[str]]:
     """
-    Internal implementation that returns a 3-tuple:
-        (result_dict, skip_reason, error_message)
-
-    Exactly one of the three will be non-None:
-      - result_dict  : scanned successfully and passed threshold
-      - skip_reason  : scanned successfully but filtered out (below_threshold / empty_chain)
-      - error_message: fetch or calculation failed
-
-    Fetches live data from Dhan using the supplied user credentials.
+    Returns a 3-tuple: (result_dict, skip_reason, error_message).
+    Exactly one element is non-None.
     """
-    import time as _time
-    t0 = _time.monotonic()
+    t0 = time.monotonic()
     try:
-        chain: OptionChainResult = dhan_get_option_chain(
-            symbol.upper(), client_id=client_id,
-            access_token=access_token, expiry=expiry,
-        )
-        fetch_ms = (_time.monotonic() - t0) * 1000
+        chain: OptionChainResult = nse_pw.get_option_chain(symbol.upper(), expiry=expiry)
+        fetch_ms = (time.monotonic() - t0) * 1000
 
         if not chain.strikes:
             logger.warning("[SCAN] symbol=%s rows=0 SKIP empty_chain fetch_ms=%.0f", symbol, fetch_ms)
@@ -130,7 +109,6 @@ def _scan_symbol_internal(
 
         mp: MaxPainResult = calculate_max_pain(chain)
 
-        # Mandatory [SCAN] log line — always at INFO so it's visible in logs
         logger.info(
             "[SCAN] symbol=%s rows=%d spot=%.2f max_pain=%.2f distance_pct=%.2f%% "
             "pcr=%.3f expiry=%s fetch_ms=%.0f threshold=%.1f%%",
@@ -145,12 +123,11 @@ def _scan_symbol_internal(
             )
             return None, _SKIP_BELOW_THRESHOLD, None
 
-        # OI change aggregates
         total_ce_oi_change = sum(s.ce.oi_change for s in chain.strikes)
         total_pe_oi_change = sum(s.pe.oi_change for s in chain.strikes)
 
-        ce_oi      = mp.ce_wall.oi if mp.ce_wall else 0
-        pe_oi      = mp.pe_wall.oi if mp.pe_wall else 0
+        ce_oi       = mp.ce_wall.oi if mp.ce_wall else 0
+        pe_oi       = mp.pe_wall.oi if mp.pe_wall else 0
         oi_bias_str = _oi_bias(ce_oi, pe_oi)
 
         dte = days_until_expiry(chain.expiry)
@@ -166,7 +143,6 @@ def _scan_symbol_internal(
         )
 
         direction = "bearish" if mp.spot_price > mp.max_pain else "bullish"
-
         if mp.pcr > 1.2:
             pcr_bias = "bullish"
         elif mp.pcr < 0.8:
@@ -175,36 +151,36 @@ def _scan_symbol_internal(
             pcr_bias = "neutral"
 
         result = {
-            "symbol":            chain.symbol,
-            "spot_price":        mp.spot_price,
-            "max_pain":          mp.max_pain,
-            "distance_pct":      mp.distance_pct,
+            "symbol":             chain.symbol,
+            "spot_price":         mp.spot_price,
+            "max_pain":           mp.max_pain,
+            "distance_pct":       mp.distance_pct,
             "distance_from_spot": mp.distance_from_spot,
-            "distance_level":    _classify_distance(mp.distance_pct),
-            "direction":         direction,
-            "pcr":               mp.pcr,
-            "pcr_bias":          pcr_bias,
-            "oi_bias":           oi_bias_str,
-            "expiry":            chain.expiry,
-            "all_expiries":      chain.all_expiries,
-            "days_to_expiry":    dte,
-            "total_ce_oi":       mp.total_ce_oi,
-            "total_pe_oi":       mp.total_pe_oi,
-            "ce_oi_wall":        mp.ce_wall.strike if mp.ce_wall else None,
-            "pe_oi_wall":        mp.pe_wall.strike if mp.pe_wall else None,
-            "ce_oi_wall_oi":     mp.ce_wall.oi     if mp.ce_wall else None,
-            "pe_oi_wall_oi":     mp.pe_wall.oi     if mp.pe_wall else None,
-            "reversal_score":    rev["score"],
-            "reversal_category": rev["category"],
-            "reversal_color":    rev["color"],
+            "distance_level":     _classify_distance(mp.distance_pct),
+            "direction":          direction,
+            "pcr":                mp.pcr,
+            "pcr_bias":           pcr_bias,
+            "oi_bias":            oi_bias_str,
+            "expiry":             chain.expiry,
+            "all_expiries":       chain.all_expiries,
+            "days_to_expiry":     dte,
+            "total_ce_oi":        mp.total_ce_oi,
+            "total_pe_oi":        mp.total_pe_oi,
+            "ce_oi_wall":         mp.ce_wall.strike  if mp.ce_wall else None,
+            "pe_oi_wall":         mp.pe_wall.strike  if mp.pe_wall else None,
+            "ce_oi_wall_oi":      mp.ce_wall.oi      if mp.ce_wall else None,
+            "pe_oi_wall_oi":      mp.pe_wall.oi      if mp.pe_wall else None,
+            "reversal_score":     rev["score"],
+            "reversal_category":  rev["category"],
+            "reversal_color":     rev["color"],
             "reversal_breakdown": rev["breakdown"],
-            "oi_zones":          _oi_buildup_zones(chain),
-            "pain_values":       [p.to_dict() for p in mp.pain_curve],
-            "top_pain_strikes":  [p.to_dict() for p in mp.top_pain_strikes],
-            "option_chain":      [s.to_dict() for s in chain.strikes],
-            "timestamp":         chain.timestamp,
-            "atm_ce_iv":         chain.atm_ce_iv,
-            "atm_pe_iv":         chain.atm_pe_iv,
+            "oi_zones":           _oi_buildup_zones(chain),
+            "pain_values":        [p.to_dict() for p in mp.pain_curve],
+            "top_pain_strikes":   [p.to_dict() for p in mp.top_pain_strikes],
+            "option_chain":       [s.to_dict() for s in chain.strikes],
+            "timestamp":          chain.timestamp,
+            "atm_ce_iv":          chain.atm_ce_iv,
+            "atm_pe_iv":          chain.atm_pe_iv,
         }
         logger.info(
             "[SCAN] symbol=%s HIT distance=%.2f%% direction=%s pcr=%.3f "
@@ -213,78 +189,45 @@ def _scan_symbol_internal(
         )
         return result, None, None
 
-    except DhanCredentialError:
-        # Bad/expired token — let run_scanner abort the whole scan early
-        raise
-
     except NSEMarketClosedError as exc:
-        fetch_ms = (_time.monotonic() - t0) * 1000
-        logger.warning(
-            "[SCAN] symbol=%s SKIP market_closed fetch_ms=%.0f — %s",
-            symbol, fetch_ms, exc,
-        )
-        return None, _SKIP_MARKET_CLOSED, None  # not an error — expected off-hours
+        fetch_ms = (time.monotonic() - t0) * 1000
+        logger.warning("[SCAN] symbol=%s SKIP market_closed fetch_ms=%.0f — %s", symbol, fetch_ms, exc)
+        return None, _SKIP_MARKET_CLOSED, None
 
     except Exception as exc:
-        fetch_ms = (_time.monotonic() - t0) * 1000
-        logger.error(
-            "[SCAN] symbol=%s FAILED fetch_ms=%.0f error=%s",
-            symbol, fetch_ms, exc,
-        )
+        fetch_ms = (time.monotonic() - t0) * 1000
+        logger.error("[SCAN] symbol=%s FAILED fetch_ms=%.0f error=%s", symbol, fetch_ms, exc)
         return None, None, str(exc)
 
 
 def scan_symbol(
     symbol: str,
-    client_id: str,
-    access_token: str,
     expiry: Optional[str] = None,
     threshold_pct: float  = 2.0,
 ) -> Optional[dict]:
-    """
-    Public interface — same contract as before: returns dict or None.
-    Callers that need error detail should use _scan_symbol_internal.
-    """
-    result, _skip, _err = _scan_symbol_internal(
-        symbol, client_id, access_token, expiry, threshold_pct
-    )
+    result, _skip, _err = _scan_symbol_internal(symbol, expiry, threshold_pct)
     return result
 
 
-# ---------------------------------------------------------------------------
-# Multi-symbol scanner
-# ---------------------------------------------------------------------------
+# ── Multi-symbol scanner ──────────────────────────────────────────────────────
 
 def run_scanner(
-    client_id: str,
-    access_token: str,
     symbols: Optional[list[str]] = None,
     threshold_pct: float = 2.0,
     expiry: Optional[str] = None,
-    max_workers: int = 1,   # kept for signature compat; Dhan is rate-limited so we run sequentially
 ) -> dict:
     """
-    Run the deviation scanner across multiple symbols, fetching live data from
-    Dhan with the supplied user credentials.
+    Run the deviation scanner across multiple symbols using NSE data
+    fetched via headless Chromium.  No credentials required.
 
-    Dhan rate-limits the Option Chain API to 1 request / 3 seconds per token,
-    so symbols are scanned SEQUENTIALLY (the Dhan service enforces the spacing).
-
-    Raises DhanCredentialError if the token is rejected (caller should surface
-    a "reconnect your Dhan account" message rather than treating it per-symbol).
-
-    Returns the same dict shape as before:
-    {
-        "results", "summary", "errors", "below_threshold",
-        "market_closed", "metrics"
-    }
+    Returns:
+        { "results", "summary", "errors", "below_threshold", "market_closed", "metrics" }
     """
-    import time as _time
-    target       = symbols or DEFAULT_FO_UNIVERSE
-    scan_start   = _time.monotonic()
+    target     = symbols or DEFAULT_FO_UNIVERSE
+    scan_start = time.monotonic()
 
     logger.info(
-        "[SCANNER] Starting Dhan scan — symbols=%d threshold=%.1f%% expiry=%s (sequential, rate-limited)",
+        "[SCANNER] Starting NSE scan — symbols=%d threshold=%.1f%% expiry=%s",
         len(target), threshold_pct, expiry or "nearest",
     )
 
@@ -292,43 +235,31 @@ def run_scanner(
     errors:          list[dict] = []
     below_threshold: list[str]  = []
     market_closed:   list[str]  = []
-    captcha_count     = 0
 
     for sym in target:
         try:
-            result, skip_reason, error_msg = _scan_symbol_internal(
-                sym, client_id, access_token, expiry, threshold_pct
-            )
+            result, skip_reason, error_msg = _scan_symbol_internal(sym, expiry, threshold_pct)
             if result is not None:
                 results.append(result)
             elif skip_reason == _SKIP_BELOW_THRESHOLD:
                 below_threshold.append(sym)
             elif skip_reason == _SKIP_MARKET_CLOSED:
                 market_closed.append(sym)
-                captcha_count += 1
             elif error_msg is not None:
-                if "market" in error_msg.lower() or "empty" in error_msg.lower() or "closed" in error_msg.lower():
+                if any(k in error_msg.lower() for k in ("market", "empty", "closed")):
                     market_closed.append(sym)
-                    captcha_count += 1
                 else:
                     errors.append({"symbol": sym, "error": error_msg})
             else:
                 errors.append({"symbol": sym, "error": f"skipped: {skip_reason}"})
-        except DhanCredentialError:
-            # Token is bad/expired — abort the whole scan, no point continuing
-            logger.error("[SCANNER] Dhan credentials rejected — aborting scan")
-            raise
         except Exception as exc:
             errors.append({"symbol": sym, "error": str(exc)})
-            logger.error("[SCANNER] Error scanning %s: %s", sym, exc)
+            logger.error("[SCANNER] Unexpected error scanning %s: %s", sym, exc)
 
-    effective_workers = 1
     results.sort(key=lambda x: x["distance_pct"], reverse=True)
 
-    scan_elapsed_ms = (_time.monotonic() - scan_start) * 1000
+    scan_elapsed_ms = (time.monotonic() - scan_start) * 1000
     fetch_success   = len(results) + len(below_threshold)
-    fetch_failed    = len(errors)
-    avg_fetch_ms    = round(scan_elapsed_ms / max(len(target), 1), 1)
 
     logger.info(
         "[SCANNER] Scan complete — total=%d hits=%d below_threshold=%d "
@@ -337,46 +268,33 @@ def run_scanner(
         len(market_closed), len(errors), scan_elapsed_ms / 1000,
     )
 
-    if errors:
-        logger.warning(
-            "[SCANNER] %d symbol(s) failed — first: %s: %s",
-            len(errors), errors[0]["symbol"], errors[0]["error"],
-        )
-
-    if market_closed:
-        logger.info(
-            "[SCANNER] %d symbol(s) returned empty (market closed / throttled): %s",
-            len(market_closed), market_closed[:5],
-        )
-
     metrics = {
         "symbols_total":      len(target),
         "fetch_success":      fetch_success,
-        "fetch_failed":       fetch_failed,
+        "fetch_failed":       len(errors),
         "threshold_filtered": len(below_threshold),
         "returned_results":   len(results),
-        "captcha_blocks":     captcha_count,
         "market_closed":      len(market_closed),
-        "avg_fetch_ms":       avg_fetch_ms,
         "scan_elapsed_ms":    round(scan_elapsed_ms, 1),
-        "effective_workers":  effective_workers,
+        "avg_fetch_ms":       round(scan_elapsed_ms / max(len(target), 1), 1),
+        "effective_workers":  1,
     }
 
     summary = build_summary(
         results,
         len(target),
-        total_errors=len(errors),
-        total_below_threshold=len(below_threshold),
-        total_market_closed=len(market_closed),
+        total_errors          = len(errors),
+        total_below_threshold = len(below_threshold),
+        total_market_closed   = len(market_closed),
     )
 
     return {
-        "results":          results,
-        "summary":          summary,
-        "errors":           errors,
-        "below_threshold":  below_threshold,
-        "market_closed":    market_closed,
-        "metrics":          metrics,
+        "results":         results,
+        "summary":         summary,
+        "errors":          errors,
+        "below_threshold": below_threshold,
+        "market_closed":   market_closed,
+        "metrics":         metrics,
     }
 
 
@@ -398,7 +316,6 @@ def build_summary(
         "strongest_bullish":     None,
         "strongest_bearish":     None,
     }
-
     if not results:
         return base
 
@@ -406,9 +323,9 @@ def build_summary(
     bearish = [r for r in results if r["direction"] == "bearish"]
 
     base.update({
-        "highest_deviation":  results[0],
-        "highest_pcr":        max(results, key=lambda x: x["pcr"]),
-        "strongest_bullish":  (max(bullish, key=lambda x: x["reversal_score"]) if bullish else None),
-        "strongest_bearish":  (max(bearish, key=lambda x: x["reversal_score"]) if bearish else None),
+        "highest_deviation": results[0],
+        "highest_pcr":       max(results, key=lambda x: x["pcr"]),
+        "strongest_bullish": (max(bullish, key=lambda x: x["reversal_score"]) if bullish else None),
+        "strongest_bearish": (max(bearish, key=lambda x: x["reversal_score"]) if bearish else None),
     })
     return base

@@ -5,10 +5,9 @@ export const maxpainApi = {
    * Run the deviation scanner.
    * @param {object} params – { threshold, symbols, expiry }
    */
-  // Dhan rate-limits option-chain to 1 req/3s, so a full 47-symbol scan can
-  // take 3-5 minutes on the first run. Allow up to 8 minutes.
+  // NSE via Playwright: ~1-3s per symbol, 47 symbols ≈ 2-3 min. Allow 5 min.
   scan: (params = {}) =>
-    client.get('/max-pain/scan', { params, timeout: 480000 }),
+    client.get('/max-pain/scan', { params, timeout: 300000 }),
 
   /**
    * Full detail for a single symbol.

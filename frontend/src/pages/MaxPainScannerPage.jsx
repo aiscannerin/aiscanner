@@ -409,10 +409,6 @@ export default function MaxPainScannerPage() {
   const [snapshotCreatedAt,   setSnapshotCreatedAt]   = useState(null)
   const [snapshotAgeMinutes,  setSnapshotAgeMinutes]  = useState(null)
   const [snapshotBannerDismissed, setSnapshotBannerDismissed] = useState(false)
-  // Broker (Dhan) connection state — derived from scan response
-  const [brokerConnected,     setBrokerConnected]     = useState(true)
-  const [brokerTokenInvalid,  setBrokerTokenInvalid]  = useState(false)
-
   const timerRef = useRef(null)
 
   const runScan = useCallback(async () => {
@@ -470,10 +466,6 @@ export default function MaxPainScannerPage() {
       setNseOk(errs.length === 0)
       setLastUpdate(new Date().toLocaleTimeString())
       setHasScanned(true)
-
-      // Broker connection state (Dhan)
-      setBrokerConnected(envelope.broker_connected !== false)
-      setBrokerTokenInvalid(Boolean(envelope.broker_token_invalid))
 
       // ── Snapshot fallback active ─────────────────────────────────────────
       // Priority 1: backend served a snapshot — show banner, table renders rows
@@ -568,30 +560,6 @@ export default function MaxPainScannerPage() {
           </div>
         </div>
 
-        {/* Connect-Dhan banner — shown when the user has no/invalid Dhan token.
-            Live refresh needs the user's own Dhan API token. */}
-        {hasScanned && (!brokerConnected || brokerTokenInvalid) && (
-          <div className="rounded-xl px-4 py-3 flex items-start gap-3 border bg-amber-500/10 border-amber-500/30">
-            <Info className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
-            <div className="flex-1">
-              <p className="text-sm font-semibold text-amber-400">
-                {brokerTokenInvalid ? 'Dhan token expired or invalid' : 'Connect your Dhan account for live data'}
-              </p>
-              <p className="text-xs mt-0.5 leading-relaxed text-amber-400/80">
-                {brokerTokenInvalid
-                  ? 'Your saved Dhan access token was rejected. Reconnect to refresh live option-chain data. '
-                  : 'Live option-chain data is fetched using your own Dhan API token. '}
-                {results.length > 0 && 'You are currently viewing the latest shared snapshot.'}
-              </p>
-            </div>
-            <button
-              onClick={() => navigate('/settings')}
-              className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30"
-            >
-              {brokerTokenInvalid ? 'Reconnect Dhan →' : 'Connect Dhan →'}
-            </button>
-          </div>
-        )}
 
         {/* Error / notice banner — suppressed when rows are already showing
             (snapshot rows take visual priority over any stale error state) */}

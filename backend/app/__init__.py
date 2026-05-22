@@ -50,6 +50,11 @@ def create_app(config_class=None):
     # ── Blueprints ───────────────────────────────────────────────────────────────
     _register_blueprints(app)
 
+    # ── Playwright browser teardown ──────────────────────────────────────────────
+    import atexit
+    from app.services import nse_playwright_service as _nse_pw
+    atexit.register(_nse_pw.shutdown)
+
     return app
 
 
