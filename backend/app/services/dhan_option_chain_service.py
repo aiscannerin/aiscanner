@@ -91,13 +91,21 @@ def _post(url: str, body: dict, client_id: str, access_token: str) -> dict:
         raise NSEFetchError(f"Dhan request failed: {exc}") from exc
 
     if resp.status_code in (401, 403):
+        body_snippet = resp.text[:300] if resp.text else "(empty body)"
+        logger.error(
+            "[DHAN] Credential rejected HTTP %s for client=%s | body: %s",
+            resp.status_code, client_id[:6] + "***" if len(client_id) > 6 else client_id,
+            body_snippet,
+        )
         raise DhanCredentialError(
-            f"Dhan rejected credentials (HTTP {resp.status_code}). "
-            "Access token may be invalid or expired — reconnect your Dhan account."
+            f"Dhan rejected credentials (HTTP {resp.status_code}): {body_snippet[:120]}. "
+            "Access token may be invalid/expired, or DhanHQ API access not yet enabled — "
+            "see web.dhan.co → My Profile → DhanHQ Trading APIs."
         )
     if resp.status_code == 429:
         raise NSEFetchError("Dhan rate limit hit (HTTP 429) — slow down.")
     if not resp.ok:
+        logger.error("[DHAN] HTTP %s for client=%s | body: %s", resp.status_code, client_id[:6], resp.text[:300])
         raise NSEFetchError(f"Dhan HTTP {resp.status_code}: {resp.text[:200]}")
 
     try:
@@ -110,6 +118,7 @@ def _post(url: str, body: dict, client_id: str, access_token: str) -> dict:
     if status and status not in ("success", "ok"):
         remarks = data.get("remarks") or data.get("message") or data
         msg = str(remarks)
+        logger.error("[DHAN] status=%s remarks=%s full=%s", status, msg[:200], str(data)[:300])
         if any(k in msg.lower() for k in ("token", "auth", "client", "invalid")):
             raise DhanCredentialError(f"Dhan auth error: {msg[:200]}")
         raise NSEDataError(f"Dhan error: {msg[:200]}")
