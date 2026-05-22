@@ -5,8 +5,10 @@ export const maxpainApi = {
    * Run the deviation scanner.
    * @param {object} params – { threshold, symbols, expiry }
    */
+  // Dhan rate-limits option-chain to 1 req/3s, so a full 47-symbol scan can
+  // take 3-5 minutes on the first run. Allow up to 8 minutes.
   scan: (params = {}) =>
-    client.get('/max-pain/scan', { params, timeout: 120000 }),
+    client.get('/max-pain/scan', { params, timeout: 480000 }),
 
   /**
    * Full detail for a single symbol.

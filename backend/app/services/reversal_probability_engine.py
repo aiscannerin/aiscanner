@@ -153,10 +153,15 @@ def _categorize(score: float) -> tuple:
 
 
 def days_until_expiry(expiry_str: str) -> int:
-    """Parse NSE expiry date string (e.g. '25-Jul-2024') and return days to expiry."""
-    try:
-        expiry_dt = datetime.strptime(expiry_str, "%d-%b-%Y")
-        delta = expiry_dt.date() - datetime.now().date()
-        return max(0, delta.days)
-    except (ValueError, TypeError):
-        return 30
+    """
+    Parse an expiry date string and return days to expiry.
+    Supports NSE format ('25-Jul-2024') and Dhan format ('2024-07-25').
+    """
+    for fmt in ("%d-%b-%Y", "%Y-%m-%d"):
+        try:
+            expiry_dt = datetime.strptime(expiry_str, fmt)
+            delta = expiry_dt.date() - datetime.now().date()
+            return max(0, delta.days)
+        except (ValueError, TypeError):
+            continue
+    return 30

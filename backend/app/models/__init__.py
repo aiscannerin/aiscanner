@@ -15,6 +15,7 @@ from app.models.nse_universe_stock import NseUniverseStock
 from app.models.scanner_notification import ScannerNotification
 from app.models.user_tracked_symbol import UserTrackedSymbol
 from app.models.user_alert_settings import UserAlertSettings
+from app.models.user_broker_credential import UserBrokerCredential
 from app.models.max_pain_snapshot import MaxPainSnapshot, OIWallSnapshot
 from app.models.regime_snapshot import RegimeSnapshot
 from app.models.scan_snapshot import ScanSnapshot
@@ -37,6 +38,7 @@ __all__ = [
     "ScannerNotification",
     "UserTrackedSymbol",
     "UserAlertSettings",
+    "UserBrokerCredential",
     "MaxPainSnapshot",
     "OIWallSnapshot",
     "RegimeSnapshot",

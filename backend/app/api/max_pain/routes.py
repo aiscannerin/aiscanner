@@ -6,7 +6,10 @@ import logging
 from datetime import datetime, timezone
 
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required
+from flask_jwt_extended import jwt_required, get_jwt_identity
+
+from app.services import broker_credential_service
+from app.services.dhan_option_chain_service import DhanCredentialError
 
 from app.services.scan_snapshot_service import (
     save_scan_snapshot,
@@ -22,10 +25,12 @@ from app.services.max_pain_scanner_service import (
     DEFAULT_FO_UNIVERSE,
 )
 from app.services.nse_option_chain_service import (
-    get_option_chain,
     _get_service as _get_nse_service,
     NSEMarketClosedError,
     _extract_nse_payload,
+)
+from app.services.dhan_option_chain_service import (
+    get_option_chain as _dhan_get_option_chain,
 )
 from app.services.option_chain_monitor import monitor
 from app.services.max_pain_engine import MaxPainError, calculate_max_pain, get_oi_walls
@@ -33,6 +38,36 @@ from app.services.max_pain_engine import MaxPainError, calculate_max_pain, get_o
 logger = logging.getLogger(__name__)
 
 max_pain_bp = Blueprint("max_pain", __name__, url_prefix="/api/max-pain")
+
+
+# ---------------------------------------------------------------------------
+# Helpers — resolve the current user's Dhan credentials and fetch via Dhan
+# ---------------------------------------------------------------------------
+
+def _current_dhan_creds():
+    """Return (client_id, access_token) for the JWT user, or None if unconnected."""
+    try:
+        return broker_credential_service.get_decrypted(get_jwt_identity(), "dhan")
+    except Exception as exc:
+        logger.warning("[max_pain] could not load Dhan creds: %s", exc)
+        return None
+
+
+def get_option_chain(symbol, expiry=None):
+    """
+    Fetch an option chain via the current user's Dhan account.
+    Drop-in replacement for the old NSE get_option_chain used across routes.
+    Raises DhanCredentialError if the user hasn't connected Dhan.
+    """
+    creds = _current_dhan_creds()
+    if creds is None:
+        raise DhanCredentialError(
+            "Connect your Dhan account (Settings) to view live option data."
+        )
+    client_id, access_token = creds
+    return _dhan_get_option_chain(
+        symbol, client_id=client_id, access_token=access_token, expiry=expiry,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -70,18 +105,46 @@ def scan():
             expiry or "nearest",
         )
 
-        # ── Always scan at threshold=0 internally ───────────────────────────
-        # This ensures the snapshot always captures the FULL live universe.
-        # The user's threshold is applied in Python afterward — no extra NSE
-        # calls, just a list filter.  This fixes the "only 3 results in
-        # snapshot" problem where snapshots saved at threshold=2 only kept
-        # the 3 stocks that happened to be above 2% at capture time.
-        result_full = run_scanner(
-            symbols=symbols,
-            threshold_pct=0.0,      # always fetch everything
-            expiry=expiry,
-            max_workers=6,
-        )
+        # ── Resolve the user's Dhan credentials ─────────────────────────────
+        # Live data now comes from Dhan using each user's own API token.
+        # If the user hasn't connected Dhan, we skip the live scan and serve
+        # the latest shared snapshot (read-only) instead.
+        user_id = get_jwt_identity()
+        creds = None
+        no_credentials = False
+        bad_credentials = False
+        try:
+            creds = broker_credential_service.get_decrypted(user_id, "dhan")
+        except Exception as exc:
+            logger.warning("[SCAN /scan] could not load Dhan creds: %s", exc)
+            creds = None
+
+        if creds is None:
+            no_credentials = True
+            logger.info("[SCAN /scan] user has no Dhan credentials — snapshot only")
+            result_full = {
+                "results": [], "errors": [], "below_threshold": [],
+                "market_closed": [], "metrics": {}, "summary": {},
+            }
+        else:
+            client_id, access_token = creds
+            # ── Always scan at threshold=0 internally ───────────────────────
+            # Ensures the snapshot captures the FULL universe; the user's
+            # threshold is applied in Python afterward (just a list filter).
+            try:
+                result_full = run_scanner(
+                    client_id, access_token,
+                    symbols=symbols,
+                    threshold_pct=0.0,      # always fetch everything
+                    expiry=expiry,
+                )
+            except DhanCredentialError as exc:
+                bad_credentials = True
+                logger.warning("[SCAN /scan] Dhan credentials rejected: %s", exc)
+                result_full = {
+                    "results": [], "errors": [], "below_threshold": [],
+                    "market_closed": [], "metrics": {}, "summary": {},
+                }
 
         metrics = result_full.get("metrics", {})
         all_live            = result_full.get("results", [])       # all symbols with live data
@@ -137,10 +200,14 @@ def scan():
         fallback_reason  = None
 
         if not has_live_data:
-            if market_closed_count > 0:
+            if no_credentials:
+                fallback_reason = "no_credentials"
+            elif bad_credentials:
+                fallback_reason = "bad_credentials"
+            elif market_closed_count > 0:
                 fallback_reason = f"market_closed({market_closed_count})"
             elif len(result_full.get("errors", [])) > 0:
-                fallback_reason = f"nse_errors({len(result_full.get('errors', []))})"
+                fallback_reason = f"dhan_errors({len(result_full.get('errors', []))})"
             else:
                 fallback_reason = "no_results"
 
@@ -205,6 +272,9 @@ def scan():
             "snapshot_age_minutes":     snapshot_age_min,
             "snapshot_created_at":      snapshot_created,
             "snapshot_fallback_reason": fallback_reason,
+            "broker_connected":         not no_credentials,
+            "broker_token_invalid":     bad_credentials,
+            "data_source":              "dhan",
             "meta": {
                 "threshold_pct":     threshold,
                 "symbols_requested": symbol_count,
@@ -235,29 +305,31 @@ def symbol_detail(symbol: str):
         symbol = symbol.upper().strip()
         expiry = request.args.get("expiry", None) or None
 
-        result = scan_symbol(symbol, expiry=expiry, threshold_pct=0.0)
-        if result is None:
-            chain = get_option_chain(symbol, expiry=expiry)
-            mp    = calculate_max_pain(chain)
-            walls = get_oi_walls(chain)
-            result = {
-                "symbol":      symbol,
-                "spot_price":  mp.spot_price,
-                "max_pain":    mp.max_pain,
-                "distance_pct": mp.distance_pct,
-                "pcr":         mp.pcr,
-                "total_ce_oi": mp.total_ce_oi,
-                "total_pe_oi": mp.total_pe_oi,
-                "pain_values": [p.to_dict() for p in mp.pain_curve],
-                "ce_wall":     walls.ce_wall.to_dict(),
-                "pe_wall":     walls.pe_wall.to_dict(),
-                "all_expiries": chain.all_expiries,
-                "expiry":      chain.expiry,
-                "timestamp":   chain.timestamp,
-            }
+        # Fetch via the current user's Dhan account and compute max pain.
+        chain = get_option_chain(symbol, expiry=expiry)
+        mp    = calculate_max_pain(chain)
+        walls = get_oi_walls(chain)
+        result = {
+            "symbol":      symbol,
+            "spot_price":  mp.spot_price,
+            "max_pain":    mp.max_pain,
+            "distance_pct": mp.distance_pct,
+            "pcr":         mp.pcr,
+            "total_ce_oi": mp.total_ce_oi,
+            "total_pe_oi": mp.total_pe_oi,
+            "pain_values": [p.to_dict() for p in mp.pain_curve],
+            "ce_wall":     walls.ce_wall.to_dict(),
+            "pe_wall":     walls.pe_wall.to_dict(),
+            "all_expiries": chain.all_expiries,
+            "expiry":      chain.expiry,
+            "timestamp":   chain.timestamp,
+        }
 
         return jsonify({"success": True, "data": result}), 200
 
+    except DhanCredentialError as exc:
+        return jsonify({"success": False, "error": str(exc),
+                        "broker_connected": False}), 200
     except Exception as exc:
         logger.error("Symbol detail error for %s: %s", symbol, exc, exc_info=True)
         return jsonify({"success": False, "error": str(exc)}), 500
@@ -595,7 +667,13 @@ def debug_test_symbol(symbol: str):
 
     # Stage 3: Full scan (threshold=0 to bypass filter)
     try:
-        result, skip_reason, error_msg = _scan_symbol_internal(symbol, expiry, threshold_pct=0.0)
+        _creds = _current_dhan_creds()
+        if _creds is None:
+            raise DhanCredentialError("No Dhan credentials for this user.")
+        _cid, _tok = _creds
+        result, skip_reason, error_msg = _scan_symbol_internal(
+            symbol, _cid, _tok, expiry, threshold_pct=0.0
+        )
         diag["stages"]["full_scan"] = {
             "ok":          result is not None,
             "skip_reason": skip_reason,
@@ -644,11 +722,19 @@ def debug_raw_scan():
         symbols, expiry or "nearest", workers,
     )
 
+    _creds = _current_dhan_creds()
+    if _creds is None:
+        return jsonify({
+            "success": False,
+            "error": "Connect your Dhan account to run a scan.",
+            "broker_connected": False,
+        }), 200
+    _cid, _tok = _creds
     result = run_scanner(
+        _cid, _tok,
         symbols=symbols,
         threshold_pct=0.0,   # ← bypass ALL threshold filtering
         expiry=expiry,
-        max_workers=workers,
     )
 
     return jsonify({

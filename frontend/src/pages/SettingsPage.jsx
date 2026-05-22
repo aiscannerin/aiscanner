@@ -13,6 +13,7 @@ import { useAuth }             from '../context/AuthContext'
 import { useShowToast }        from '../context/ToastContext'
 import { apiGetMe }            from '../api/auth'
 import { apiGetCurrentSub }    from '../api/pricing'
+import { brokerApi }           from '../api/broker'
 
 // ── design tokens ─────────────────────────────────────────────────────────────
 const T = {
@@ -110,6 +111,200 @@ function VerifiedBadge({ verified }) {
     }}>
       {verified ? '✓ Verified' : '⚠ Unverified'}
     </span>
+  )
+}
+
+// ── Dhan broker connection card ───────────────────────────────────────────────
+
+function DhanCard() {
+  const showToast = useShowToast()
+  const [status,   setStatus]   = useState(null)   // {connected, is_valid, client_id, last_error}
+  const [loading,  setLoading]  = useState(true)
+  const [clientId, setClientId] = useState('')
+  const [token,    setToken]    = useState('')
+  const [saving,   setSaving]   = useState(false)
+  const [testing,  setTesting]  = useState(false)
+
+  function loadStatus() {
+    brokerApi.getDhanStatus()
+      .then(r => {
+        const d = r.data?.data ?? null
+        setStatus(d)
+        if (d?.client_id) setClientId(d.client_id)
+      })
+      .catch(() => setStatus(null))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(loadStatus, [])
+
+  async function handleSave() {
+    if (!clientId.trim() || !token.trim()) {
+      showToast('Enter both Client ID and Access Token.', 'error')
+      return
+    }
+    setSaving(true)
+    try {
+      const r = await brokerApi.saveDhan({ client_id: clientId.trim(), access_token: token.trim() })
+      const d = r.data?.data ?? null
+      setStatus(d)
+      setToken('')   // clear token field after save
+      showToast(r.data?.message ?? 'Saved.', d?.is_valid ? 'success' : 'info')
+    } catch (err) {
+      showToast(err.response?.data?.message ?? 'Could not save credentials.', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleTest() {
+    setTesting(true)
+    try {
+      const r = await brokerApi.testDhan()
+      showToast(r.data?.message ?? 'Connection OK.', 'success')
+      loadStatus()
+    } catch (err) {
+      showToast(err.response?.data?.message ?? 'Verification failed.', 'error')
+      loadStatus()
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  async function handleDisconnect() {
+    setSaving(true)
+    try {
+      await brokerApi.deleteDhan()
+      setStatus({ connected: false, is_valid: false })
+      setClientId(''); setToken('')
+      showToast('Dhan account disconnected.', 'info')
+    } catch (err) {
+      showToast(err.response?.data?.message ?? 'Could not disconnect.', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const connected = status?.connected
+  const valid     = status?.is_valid
+
+  const inputStyle = {
+    width: '100%', padding: '10px 12px', borderRadius: '9px',
+    background: 'rgba(255,255,255,0.05)', border: `1px solid ${T.border}`,
+    color: T.text, fontSize: '13px', outline: 'none', marginTop: '6px',
+  }
+  const labelStyle = { fontSize: '11px', color: T.muted, textTransform: 'uppercase', letterSpacing: '0.05em' }
+
+  return (
+    <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: '16px', padding: '24px 28px' }}>
+      <SectionLabel>Broker Connection — Dhan</SectionLabel>
+
+      {/* Status row */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '18px' }}>
+        <div style={{ fontSize: '13px', color: T.muted, maxWidth: '420px', lineHeight: 1.5 }}>
+          Connect your Dhan account to fetch live option-chain data for the Max Pain
+          Scanner. Your access token is encrypted and used only for your scans.
+        </div>
+        {!loading && (
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: '6px',
+            fontSize: '11px', fontWeight: 700, padding: '3px 11px', borderRadius: '20px',
+            background: valid ? 'rgba(0,217,126,0.12)' : connected ? 'rgba(245,158,11,0.12)' : 'rgba(179,197,255,0.08)',
+            color:      valid ? T.green : connected ? T.amber : T.muted,
+            border: `1px solid ${valid ? 'rgba(0,217,126,0.25)' : connected ? 'rgba(245,158,11,0.25)' : 'rgba(255,255,255,0.1)'}`,
+          }}>
+            {valid ? '✓ Connected & Verified' : connected ? '⚠ Saved — not verified' : '○ Not connected'}
+          </span>
+        )}
+      </div>
+
+      {connected && status?.last_error && !valid && (
+        <div style={{ fontSize: '12px', color: T.red, marginBottom: '14px',
+          background: 'rgba(255,77,79,0.06)', border: '1px solid rgba(255,77,79,0.2)',
+          borderRadius: '8px', padding: '8px 12px' }}>
+          {status.last_error}
+        </div>
+      )}
+
+      {/* Inputs */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <div>
+          <span style={labelStyle}>Dhan Client ID</span>
+          <input
+            style={inputStyle}
+            value={clientId}
+            onChange={e => setClientId(e.target.value)}
+            placeholder="e.g. 1100123456"
+            autoComplete="off"
+          />
+        </div>
+        <div>
+          <span style={labelStyle}>Access Token {connected && <span style={{ textTransform: 'none', color: T.muted }}>(leave blank to keep current)</span>}</span>
+          <input
+            style={inputStyle}
+            type="password"
+            value={token}
+            onChange={e => setToken(e.target.value)}
+            placeholder={connected ? '••••••••••••  (stored, hidden)' : 'Paste your 30-day access token'}
+            autoComplete="off"
+          />
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div style={{ display: 'flex', gap: '10px', marginTop: '18px', flexWrap: 'wrap' }}>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          style={{
+            padding: '9px 20px', borderRadius: '9px',
+            background: `linear-gradient(90deg,${T.primary},#0052cc)`, border: 'none',
+            color: '#fff', fontSize: '13px', fontWeight: 600,
+            cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1,
+            boxShadow: '0 0 16px rgba(0,102,255,0.25)',
+          }}
+        >
+          {saving ? 'Saving…' : connected ? 'Update & Verify' : 'Connect & Verify'}
+        </button>
+        {connected && (
+          <>
+            <button
+              onClick={handleTest}
+              disabled={testing}
+              style={{
+                padding: '9px 18px', borderRadius: '9px',
+                background: 'rgba(255,255,255,0.06)', border: `1px solid ${T.border}`,
+                color: T.text, fontSize: '13px', fontWeight: 600,
+                cursor: testing ? 'default' : 'pointer', opacity: testing ? 0.6 : 1,
+              }}
+            >
+              {testing ? 'Testing…' : 'Test Connection'}
+            </button>
+            <button
+              onClick={handleDisconnect}
+              disabled={saving}
+              style={{
+                padding: '9px 18px', borderRadius: '9px',
+                background: 'rgba(255,77,79,0.08)', border: '1px solid rgba(255,77,79,0.2)',
+                color: T.red, fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              Disconnect
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* How-to */}
+      <div style={{ marginTop: '18px', fontSize: '12px', color: T.muted, lineHeight: 1.6,
+        background: 'rgba(255,255,255,0.02)', border: `1px solid ${T.border}`,
+        borderRadius: '9px', padding: '12px 14px' }}>
+        <strong style={{ color: T.text }}>How to get your token:</strong><br />
+        1. Log in at <span style={{ color: T.cyan }}>web.dhan.co</span> → My Profile → DhanHQ Trading APIs / Access DhanHQ APIs.<br />
+        2. Generate an access token (valid 30 days) and copy your Client ID.<br />
+        3. Paste both here and click Connect. You'll need to regenerate the token every 30 days.
+      </div>
+    </div>
   )
 }
 
@@ -310,6 +505,11 @@ export default function SettingsPage() {
                 </button>
               </div>
             </div>
+          </motion.div>
+
+          {/* ── Dhan broker connection card ────────────────────────── */}
+          <motion.div variants={fadeUp}>
+            <DhanCard />
           </motion.div>
 
           {/* ── Security card ──────────────────────────────────────── */}

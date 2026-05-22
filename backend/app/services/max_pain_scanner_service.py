@@ -16,9 +16,12 @@ import concurrent.futures
 from typing import Optional
 
 from app.services.nse_option_chain_service import (
-    get_option_chain,
     OptionChainResult,
     NSEMarketClosedError,
+)
+from app.services.dhan_option_chain_service import (
+    get_option_chain as dhan_get_option_chain,
+    DhanCredentialError,
 )
 from app.services.max_pain_engine import (
     MaxPainResult,
@@ -96,6 +99,8 @@ _SKIP_MARKET_CLOSED    = "market_closed"
 
 def _scan_symbol_internal(
     symbol: str,
+    client_id: str,
+    access_token: str,
     expiry: Optional[str] = None,
     threshold_pct: float  = 2.0,
 ) -> tuple[Optional[dict], Optional[str], Optional[str]]:
@@ -107,11 +112,16 @@ def _scan_symbol_internal(
       - result_dict  : scanned successfully and passed threshold
       - skip_reason  : scanned successfully but filtered out (below_threshold / empty_chain)
       - error_message: fetch or calculation failed
+
+    Fetches live data from Dhan using the supplied user credentials.
     """
     import time as _time
     t0 = _time.monotonic()
     try:
-        chain: OptionChainResult = get_option_chain(symbol.upper(), expiry=expiry)
+        chain: OptionChainResult = dhan_get_option_chain(
+            symbol.upper(), client_id=client_id,
+            access_token=access_token, expiry=expiry,
+        )
         fetch_ms = (_time.monotonic() - t0) * 1000
 
         if not chain.strikes:
@@ -203,6 +213,10 @@ def _scan_symbol_internal(
         )
         return result, None, None
 
+    except DhanCredentialError:
+        # Bad/expired token — let run_scanner abort the whole scan early
+        raise
+
     except NSEMarketClosedError as exc:
         fetch_ms = (_time.monotonic() - t0) * 1000
         logger.warning(
@@ -222,6 +236,8 @@ def _scan_symbol_internal(
 
 def scan_symbol(
     symbol: str,
+    client_id: str,
+    access_token: str,
     expiry: Optional[str] = None,
     threshold_pct: float  = 2.0,
 ) -> Optional[dict]:
@@ -229,7 +245,9 @@ def scan_symbol(
     Public interface — same contract as before: returns dict or None.
     Callers that need error detail should use _scan_symbol_internal.
     """
-    result, _skip, _err = _scan_symbol_internal(symbol, expiry, threshold_pct)
+    result, _skip, _err = _scan_symbol_internal(
+        symbol, client_id, access_token, expiry, threshold_pct
+    )
     return result
 
 
@@ -238,28 +256,27 @@ def scan_symbol(
 # ---------------------------------------------------------------------------
 
 def run_scanner(
+    client_id: str,
+    access_token: str,
     symbols: Optional[list[str]] = None,
     threshold_pct: float = 2.0,
     expiry: Optional[str] = None,
-    max_workers: int = 4,
+    max_workers: int = 1,   # kept for signature compat; Dhan is rate-limited so we run sequentially
 ) -> dict:
     """
-    Run the deviation scanner across multiple symbols concurrently.
+    Run the deviation scanner across multiple symbols, fetching live data from
+    Dhan with the supplied user credentials.
 
-    Adaptive throttling: automatically reduces max_workers when the captcha /
-    empty-response rate climbs above 40% of completed symbols.
+    Dhan rate-limits the Option Chain API to 1 request / 3 seconds per token,
+    so symbols are scanned SEQUENTIALLY (the Dhan service enforces the spacing).
 
-    Returns:
+    Raises DhanCredentialError if the token is rejected (caller should surface
+    a "reconnect your Dhan account" message rather than treating it per-symbol).
+
+    Returns the same dict shape as before:
     {
-        "results"         : [ …sorted by distance_pct desc… ],
-        "summary"         : { total_scanned, total_hits, total_errors,
-                               total_below_threshold, total_market_closed,
-                               fetch_success, fetch_failed, avg_fetch_ms,
-                               captcha_blocks, symbols_total },
-        "errors"          : [ { symbol, error } ],
-        "below_threshold" : [ symbol, … ],
-        "market_closed"   : [ symbol, … ],
-        "metrics"         : { … raw counters for frontend diagnostics … },
+        "results", "summary", "errors", "below_threshold",
+        "market_closed", "metrics"
     }
     """
     import time as _time
@@ -267,65 +284,45 @@ def run_scanner(
     scan_start   = _time.monotonic()
 
     logger.info(
-        "[SCANNER] Starting scan — symbols=%d threshold=%.1f%% expiry=%s workers=%d",
-        len(target), threshold_pct, expiry or "nearest", max_workers,
+        "[SCANNER] Starting Dhan scan — symbols=%d threshold=%.1f%% expiry=%s (sequential, rate-limited)",
+        len(target), threshold_pct, expiry or "nearest",
     )
 
     results:         list[dict] = []
     errors:          list[dict] = []
     below_threshold: list[str]  = []
     market_closed:   list[str]  = []
-
-    # Adaptive throttling state
-    effective_workers = max_workers
     captcha_count     = 0
-    fetch_latencies:  list[float] = []
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers) as pool:
-        future_map = {
-            pool.submit(_scan_symbol_internal, sym, expiry, threshold_pct): sym
-            for sym in target
-        }
-        completed = 0
-        for future in concurrent.futures.as_completed(future_map):
-            sym = future_map[future]
-            completed += 1
-            try:
-                result, skip_reason, error_msg = future.result()
-                if result is not None:
-                    results.append(result)
-                elif skip_reason == _SKIP_BELOW_THRESHOLD:
-                    below_threshold.append(sym)
-                elif skip_reason == _SKIP_MARKET_CLOSED:
+    for sym in target:
+        try:
+            result, skip_reason, error_msg = _scan_symbol_internal(
+                sym, client_id, access_token, expiry, threshold_pct
+            )
+            if result is not None:
+                results.append(result)
+            elif skip_reason == _SKIP_BELOW_THRESHOLD:
+                below_threshold.append(sym)
+            elif skip_reason == _SKIP_MARKET_CLOSED:
+                market_closed.append(sym)
+                captcha_count += 1
+            elif error_msg is not None:
+                if "market" in error_msg.lower() or "empty" in error_msg.lower() or "closed" in error_msg.lower():
                     market_closed.append(sym)
-                    captcha_count += 1   # treat as throttle signal
-                elif error_msg is not None:
-                    # Distinguish captcha/empty from real errors
-                    if "market" in error_msg.lower() or "empty" in error_msg.lower() or "closed" in error_msg.lower():
-                        market_closed.append(sym)
-                        captcha_count += 1
-                    else:
-                        errors.append({"symbol": sym, "error": error_msg})
+                    captcha_count += 1
                 else:
-                    errors.append({"symbol": sym, "error": f"skipped: {skip_reason}"})
-            except Exception as exc:
-                errors.append({"symbol": sym, "error": str(exc)})
-                logger.error("[SCANNER] Future error for %s: %s", sym, exc)
+                    errors.append({"symbol": sym, "error": error_msg})
+            else:
+                errors.append({"symbol": sym, "error": f"skipped: {skip_reason}"})
+        except DhanCredentialError:
+            # Token is bad/expired — abort the whole scan, no point continuing
+            logger.error("[SCANNER] Dhan credentials rejected — aborting scan")
+            raise
+        except Exception as exc:
+            errors.append({"symbol": sym, "error": str(exc)})
+            logger.error("[SCANNER] Error scanning %s: %s", sym, exc)
 
-            # Adaptive throttling: if >40% of completed symbols are empty/captcha,
-            # add jitter between remaining submissions to reduce pressure
-            if completed >= 5:
-                captcha_rate = captcha_count / completed
-                if captcha_rate > 0.4 and effective_workers > 1:
-                    effective_workers = max(1, effective_workers - 1)
-                    logger.warning(
-                        "[SCANNER] Adaptive throttle: captcha_rate=%.0f%% — "
-                        "reducing effective workers to %d",
-                        captcha_rate * 100, effective_workers,
-                    )
-                    # Brief jitter to reduce concurrent NSE pressure
-                    import time as _t; _t.sleep(random.uniform(0.5, 1.5))
-
+    effective_workers = 1
     results.sort(key=lambda x: x["distance_pct"], reverse=True)
 
     scan_elapsed_ms = (_time.monotonic() - scan_start) * 1000

@@ -116,6 +116,9 @@ def _register_blueprints(app: Flask):
     from app.api.alert_settings import alert_settings_bp
     app.register_blueprint(alert_settings_bp, url_prefix="/api/alert-settings")
 
+    from app.api.broker import broker_bp
+    app.register_blueprint(broker_bp)
+
     from app.api.options.routes import options_bp
     app.register_blueprint(options_bp)
 
