@@ -1,27 +1,27 @@
 @echo off
-:: ============================================================
-::  update_and_restart.cmd  -  Stop Hunter Pro
-::  One-command production update script.
-::
-::  What it does (in order):
-::    1. Stops running servers (ports 3010 and 3000)
-::    2. git pull origin main
-::    3. Aborts and restarts old version if pull fails
-::    4. pip install ONLY if backend\requirements.txt changed
-::    5. npm install ONLY if frontend\package-lock.json changed
-::    6. flask db upgrade  (always - idempotent)
-::    7. Restarts servers
-::    8. Prints a summary with timestamps
-::
-::  Usage:
-::    update_and_restart.cmd
-::
-::  Safe to run from Task Scheduler or a desktop shortcut.
-:: ============================================================
+rem ============================================================
+rem  update_and_restart.cmd  -  Stop Hunter Pro
+rem  One-command production update script.
+rem
+rem  What it does (in order):
+rem    1. Stops running servers (ports 3010 and 3000)
+rem    2. git pull origin main
+rem    3. Aborts and restarts old version if pull fails
+rem    4. pip install ONLY if backend\requirements.txt changed
+rem    5. npm install ONLY if frontend\package-lock.json changed
+rem    6. flask db upgrade  (always - idempotent)
+rem    7. Restarts servers
+rem    8. Prints a summary with timestamps
+rem
+rem  Usage:
+rem    update_and_restart.cmd
+rem
+rem  Safe to run from Task Scheduler or a desktop shortcut.
+rem ============================================================
 
 setlocal EnableDelayedExpansion
 
-:: ── Resolve project root from script location ────────────────────────────────
+rem -- Resolve project root from script location --------------------------------
 set "PROJECT_DIR=%~dp0"
 if "%PROJECT_DIR:~-1%"=="\" set "PROJECT_DIR=%PROJECT_DIR:~0,-1%"
 
@@ -29,7 +29,7 @@ set "BACKEND_DIR=%PROJECT_DIR%\backend"
 set "FRONTEND_DIR=%PROJECT_DIR%\frontend"
 set "LOGFILE=%PROJECT_DIR%\update.log"
 
-:: Record start time
+rem Record start time
 set "START_TIME=%TIME%"
 
 echo.
@@ -41,14 +41,14 @@ echo   Started : %DATE% %START_TIME%
 echo  ============================================================
 echo.
 
-:: Write same header to update log
+rem Write same header to update log
 echo. >> "%LOGFILE%"
 echo ============================================================ >> "%LOGFILE%"
 echo  Update started: %DATE% %START_TIME% >> "%LOGFILE%"
 echo  Project: %PROJECT_DIR% >> "%LOGFILE%"
 echo ============================================================ >> "%LOGFILE%"
 
-:: ── Sanity checks ────────────────────────────────────────────────────────────
+rem -- Sanity checks ------------------------------------------------------------
 if not exist "%PROJECT_DIR%\.git" (
     echo  [ERROR] .git directory not found. Is this the right project folder?
     echo          Expected: %PROJECT_DIR%\.git
@@ -73,19 +73,19 @@ if errorlevel 1 (
     exit /b 1
 )
 
-:: ── Step 1: Stop servers ─────────────────────────────────────────────────────
+rem -- Step 1: Stop servers -----------------------------------------------------
 echo  [Step 1/6] Stopping servers...
 echo  [Step 1] Stopping servers >> "%LOGFILE%"
 call "%PROJECT_DIR%\stop_servers.cmd"
 echo  [Step 1] Done >> "%LOGFILE%"
 
-:: ── Step 2: git pull ─────────────────────────────────────────────────────────
+rem -- Step 2: git pull ---------------------------------------------------------
 echo  [Step 2/6] Pulling latest code from GitHub...
 echo  [Step 2] git pull >> "%LOGFILE%"
 
 cd /d "%PROJECT_DIR%"
 
-:: Save current HEAD so we can detect which files changed
+rem Save current HEAD so we can detect which files changed
 for /f %%H in ('git rev-parse HEAD 2^>nul') do set "OLD_HEAD=%%H"
 if "!OLD_HEAD!"=="" (
     echo  [ERROR] Could not determine current git HEAD. Is this a git repo?
@@ -95,7 +95,7 @@ if "!OLD_HEAD!"=="" (
 echo         Current HEAD: !OLD_HEAD!
 echo  Old HEAD: !OLD_HEAD! >> "%LOGFILE%"
 
-:: Pull (--rebase avoids the vim merge-commit prompt when histories diverge)
+rem Use --rebase to avoid the vim merge-commit prompt when histories diverge
 git pull --rebase origin main >> "%LOGFILE%" 2>&1
 set "PULL_EXIT=!ERRORLEVEL!"
 
@@ -109,7 +109,7 @@ if !PULL_EXIT! NEQ 0 (
     goto :ABORT_AND_RESTART
 )
 
-:: Get new HEAD
+rem Get new HEAD
 for /f %%H in ('git rev-parse HEAD 2^>nul') do set "NEW_HEAD=%%H"
 echo  [Step 2] Done  New HEAD: !NEW_HEAD! >> "%LOGFILE%"
 
@@ -121,11 +121,11 @@ if "!OLD_HEAD!"=="!NEW_HEAD!" (
     echo  Updated: !OLD_HEAD:~0,7! to !NEW_HEAD:~0,7! >> "%LOGFILE%"
 )
 
-:: ── Step 3: pip install (only if requirements.txt changed) ───────────────────
+rem -- Step 3: pip install (only if requirements.txt changed) -------------------
 echo  [Step 3/6] Checking backend dependencies...
 echo  [Step 3] Checking requirements.txt >> "%LOGFILE%"
 
-:: If OLD_HEAD == NEW_HEAD, skip (nothing changed)
+rem If OLD_HEAD == NEW_HEAD, skip (nothing changed)
 if "!OLD_HEAD!"=="!NEW_HEAD!" (
     echo         requirements.txt unchanged - skipping pip install.
     echo  [Step 3] Skipped (no new commits) >> "%LOGFILE%"
@@ -152,7 +152,7 @@ if !ERRORLEVEL! EQU 1 (
 )
 :SKIP_PIP
 
-:: ── Step 4: npm install (only if package-lock.json changed) ──────────────────
+rem -- Step 4: npm install (only if package-lock.json changed) ------------------
 echo  [Step 4/6] Checking frontend dependencies...
 echo  [Step 4] Checking package-lock.json >> "%LOGFILE%"
 
@@ -182,7 +182,7 @@ if !ERRORLEVEL! EQU 1 (
 )
 :SKIP_NPM
 
-:: ── Step 5: flask db upgrade ─────────────────────────────────────────────────
+rem -- Step 5: flask db upgrade -------------------------------------------------
 echo  [Step 5/6] Running flask db upgrade...
 echo  [Step 5] flask db upgrade >> "%LOGFILE%"
 
@@ -202,13 +202,13 @@ if !MIGRATE_EXIT! NEQ 0 (
 )
 cd /d "%PROJECT_DIR%"
 
-:: ── Step 6: Start servers ─────────────────────────────────────────────────────
+rem -- Step 6: Start servers -----------------------------------------------------
 echo  [Step 6/6] Starting servers...
 echo  [Step 6] Starting servers >> "%LOGFILE%"
 call "%PROJECT_DIR%\start_servers.cmd"
 echo  [Step 6] Done >> "%LOGFILE%"
 
-:: ── Success summary ──────────────────────────────────────────────────────────
+rem -- Success summary ----------------------------------------------------------
 echo.
 echo  ============================================================
 echo   Update Complete
@@ -231,7 +231,7 @@ echo ============================================================ >> "%LOGFILE%"
 endlocal
 exit /b 0
 
-:: ── Abort handler: restart old version, then exit with error ─────────────────
+rem -- Abort handler: restart old version, then exit with error -----------------
 :ABORT_AND_RESTART
 echo.
 echo  ============================================================

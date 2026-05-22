@@ -1,15 +1,15 @@
 @echo off
-:: ============================================================
-::  stop_servers.cmd  -  Stop Hunter Pro
-::  Safely stops backend (port 3010) and frontend (port 3000).
-::
-::  Strategy (two-pass):
-::    Pass 1 - kill by port (the actual Flask / Node processes)
-::    Pass 2 - kill by window title (cleanup orphaned cmd wrappers)
-::
-::  Only kills processes bound to OUR ports.
-::  Does NOT kill unrelated Python/Node/system services.
-:: ============================================================
+rem ============================================================
+rem  stop_servers.cmd  -  Stop Hunter Pro
+rem  Safely stops backend (port 3010) and frontend (port 3000).
+rem
+rem  Strategy (two-pass):
+rem    Pass 1 - kill by port (the actual Flask / Node processes)
+rem    Pass 2 - kill by window title (cleanup orphaned cmd wrappers)
+rem
+rem  Only kills processes bound to OUR ports.
+rem  Does NOT kill unrelated Python/Node/system services.
+rem ============================================================
 
 setlocal EnableDelayedExpansion
 
@@ -21,7 +21,7 @@ echo  [STOP] Stopping Stop Hunter Pro servers...
 echo  [STOP] Time: %DATE% %TIME%
 echo.
 
-:: ── Pass 1: kill by port (backend) ──────────────────────────────────────────
+rem -- Pass 1: kill by port (backend) ------------------------------------------
 echo  [1/4] Stopping backend  (port %PORT_BACKEND%)...
 set "KILLED_BACKEND=0"
 for /f "tokens=5" %%P in ('netstat -ano 2^>nul ^| findstr ":%PORT_BACKEND% "') do (
@@ -35,7 +35,7 @@ for /f "tokens=5" %%P in ('netstat -ano 2^>nul ^| findstr ":%PORT_BACKEND% "') d
 )
 if "!KILLED_BACKEND!"=="0" echo        No process found on port %PORT_BACKEND%.
 
-:: ── Pass 1: kill by port (frontend) ─────────────────────────────────────────
+rem -- Pass 1: kill by port (frontend) -----------------------------------------
 echo  [2/4] Stopping frontend (port %PORT_FRONTEND%)...
 set "KILLED_FRONTEND=0"
 for /f "tokens=5" %%P in ('netstat -ano 2^>nul ^| findstr ":%PORT_FRONTEND% "') do (
@@ -49,12 +49,12 @@ for /f "tokens=5" %%P in ('netstat -ano 2^>nul ^| findstr ":%PORT_FRONTEND% "') 
 )
 if "!KILLED_FRONTEND!"=="0" echo        No process found on port %PORT_FRONTEND%.
 
-:: ── Pass 2: kill orphaned cmd wrapper windows by title ──────────────────────
+rem -- Pass 2: kill orphaned cmd wrapper windows by title ----------------------
 echo  [3/4] Closing orphaned console windows...
 taskkill /FI "WINDOWTITLE eq SHP-Backend-3010*"  /F >nul 2>&1
 taskkill /FI "WINDOWTITLE eq SHP-Frontend-3000*" /F >nul 2>&1
 
-:: ── Confirm ports are free ───────────────────────────────────────────────────
+rem -- Confirm ports are free ---------------------------------------------------
 echo  [4/4] Waiting for sockets to release...
 timeout /t 3 /nobreak >nul
 

@@ -1,22 +1,22 @@
 @echo off
-:: ============================================================
-::  start_servers.cmd  -  Stop Hunter Pro
-::  Starts backend (port 3010) and frontend (port 3000) in
-::  separate minimized console windows with log capture.
-::
-::  Logs written to:
-::    backend\logs\backend.log
-::    frontend\logs\frontend.log
-::
-::  Duplicate prevention: aborts if ports already in use.
-::  Uses %~dp0 so this script works from any deploy location.
-:: ============================================================
+rem ============================================================
+rem  start_servers.cmd  -  Stop Hunter Pro
+rem  Starts backend (port 3010) and frontend (port 3000) in
+rem  separate minimized console windows with log capture.
+rem
+rem  Logs written to:
+rem    backend\logs\backend.log
+rem    frontend\logs\frontend.log
+rem
+rem  Duplicate prevention: aborts if ports already in use.
+rem  Uses %~dp0 so this script works from any deploy location.
+rem ============================================================
 
 setlocal EnableDelayedExpansion
 
-:: ── Resolve project root from script location ────────────────────────────────
+rem -- Resolve project root from script location --------------------------------
 set "PROJECT_DIR=%~dp0"
-:: Strip trailing backslash
+rem Strip trailing backslash
 if "%PROJECT_DIR:~-1%"=="\" set "PROJECT_DIR=%PROJECT_DIR:~0,-1%"
 
 set "BACKEND_DIR=%PROJECT_DIR%\backend"
@@ -30,7 +30,7 @@ echo  [START] Project: %PROJECT_DIR%
 echo  [START] Time:    %DATE% %TIME%
 echo.
 
-:: ── Sanity checks ────────────────────────────────────────────────────────────
+rem -- Sanity checks ------------------------------------------------------------
 if not exist "%BACKEND_DIR%\venv\Scripts\python.exe" (
     echo  [ERROR] Backend venv not found at:
     echo          %BACKEND_DIR%\venv\Scripts\python.exe
@@ -50,7 +50,7 @@ if not exist "%FRONTEND_DIR%\node_modules\vite\bin\vite.js" (
     exit /b 1
 )
 
-:: ── Duplicate prevention: abort if ports already in use ──────────────────────
+rem -- Duplicate prevention: abort if ports already in use ----------------------
 echo  [1/5] Checking ports are free...
 set "PORT_CONFLICT=0"
 
@@ -70,12 +70,12 @@ if "!PORT_CONFLICT!"=="1" (
 )
 echo        Ports %PORT_BACKEND% and %PORT_FRONTEND% are free.
 
-:: ── Ensure log directories exist ─────────────────────────────────────────────
+rem -- Ensure log directories exist ---------------------------------------------
 echo  [2/5] Preparing log directories...
 if not exist "%BACKEND_DIR%\logs"  mkdir "%BACKEND_DIR%\logs"
 if not exist "%FRONTEND_DIR%\logs" mkdir "%FRONTEND_DIR%\logs"
 
-:: Write session header to logs (append mode - keeps history across restarts)
+rem Write session header to logs (append mode - keeps history across restarts)
 echo. >> "%BACKEND_DIR%\logs\backend.log"
 echo ============================================================ >> "%BACKEND_DIR%\logs\backend.log"
 echo  Session started: %DATE% %TIME% >> "%BACKEND_DIR%\logs\backend.log"
@@ -89,19 +89,19 @@ echo ============================================================ >> "%FRONTEND_
 echo        Logs: %BACKEND_DIR%\logs\backend.log
 echo        Logs: %FRONTEND_DIR%\logs\frontend.log
 
-:: ── Start backend ─────────────────────────────────────────────────────────────
-::  /D sets working dir so relative paths inside the command work correctly.
-::  Output is appended to logs\backend.log (both stdout and stderr).
+rem -- Start backend -------------------------------------------------------------
+rem  /D sets working dir so relative paths inside the command work correctly.
+rem  Output is appended to logs\backend.log (both stdout and stderr).
 echo  [3/5] Starting backend  (http://localhost:%PORT_BACKEND%)...
 start "SHP-Backend-3010" /D "%BACKEND_DIR%" cmd /k ^
     "call venv\Scripts\activate.bat && python run.py"
 echo        Backend window started.
 
-:: ── Wait for Flask to bind ───────────────────────────────────────────────────
+rem -- Wait for Flask to bind ---------------------------------------------------
 echo  [4/5] Waiting for backend to bind...
 timeout /t 4 /nobreak >nul
 
-:: Verify backend actually came up
+rem Verify backend actually came up
 set "BACKEND_UP=0"
 for /f "tokens=5" %%P in ('netstat -ano 2^>nul ^| findstr ":%PORT_BACKEND% "') do (
     set "BACKEND_UP=1"
@@ -111,7 +111,7 @@ if "!BACKEND_UP!"=="0" (
     echo         Check logs: %BACKEND_DIR%\logs\backend.log
 )
 
-:: ── Start frontend ────────────────────────────────────────────────────────────
+rem -- Start frontend ------------------------------------------------------------
 echo  [5/5] Starting frontend (http://localhost:%PORT_FRONTEND%)...
 start "SHP-Frontend-3000" /D "%FRONTEND_DIR%" cmd /k ^
     "node node_modules\vite\bin\vite.js"

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Stop Hunter Pro — One-command bootstrap script.
+    Stop Hunter Pro - One-command bootstrap script.
     Sets up backend venv, installs all dependencies, runs DB migrations,
     and optionally seeds dev data.
 
@@ -51,7 +51,7 @@ Write-Host "  ============================================================" -For
 Write-Host "   Stop Hunter Pro - Bootstrap" -ForegroundColor Magenta
 Write-Host "  ============================================================" -ForegroundColor Magenta
 
-# ── 1. Check prerequisites ─────────────────────────────────────────────────────
+# -- 1. Check prerequisites -----------------------------------------------------
 Write-Step "Checking prerequisites..."
 
 try { $pyVer = & python --version 2>&1; Write-OK "Python: $pyVer" }
@@ -62,7 +62,7 @@ if (-not $SkipFrontend) {
     catch { Write-Fail "Node.js not found. Install Node.js 18+ and add to PATH." }
 }
 
-# ── 2. Check .env file ─────────────────────────────────────────────────────────
+# -- 2. Check .env file ---------------------------------------------------------
 Write-Step "Checking environment configuration..."
 
 $EnvFile    = Join-Path $Backend ".env"
@@ -83,7 +83,7 @@ if (-not (Test-Path $EnvFile)) {
     Write-OK "backend\.env found."
 }
 
-# ── 3. Create Python virtual environment ────────────────────────────────────────
+# -- 3. Create Python virtual environment ----------------------------------------
 Write-Step "Setting up Python virtual environment..."
 
 if (-not (Test-Path $Python)) {
@@ -95,7 +95,7 @@ if (-not (Test-Path $Python)) {
     Write-OK "Virtual environment already exists."
 }
 
-# ── 4. Install backend dependencies ────────────────────────────────────────────
+# -- 4. Install backend dependencies --------------------------------------------
 Write-Step "Installing backend dependencies..."
 
 $ReqFile = Join-Path $Backend "requirements.txt"
@@ -106,7 +106,7 @@ if (-not (Test-Path $ReqFile)) { Write-Fail "backend\requirements.txt not found.
 if (-not $?) { Write-Fail "pip install failed. Check requirements.txt and your internet connection." }
 Write-OK "Backend dependencies installed."
 
-# ── 5. Run database migrations ─────────────────────────────────────────────────
+# -- 5. Run database migrations -------------------------------------------------
 if (-not $SkipMigrations) {
     Write-Step "Running database migrations..."
     Write-Host "  (Requires DATABASE_URL in backend\.env to be valid)"
@@ -124,7 +124,7 @@ if (-not $SkipMigrations) {
     Write-Warn "Skipping migrations (--SkipMigrations flag set)."
 }
 
-# ── 6. Seed dev data ────────────────────────────────────────────────────────────
+# -- 6. Seed dev data ------------------------------------------------------------
 if ($SeedData) {
     Write-Step "Seeding development data..."
 
@@ -145,7 +145,7 @@ if ($SeedData) {
     }
 }
 
-# ── 7. Install frontend dependencies ───────────────────────────────────────────
+# -- 7. Install frontend dependencies -------------------------------------------
 if (-not $SkipFrontend) {
     Write-Step "Installing frontend dependencies..."
 
@@ -161,7 +161,7 @@ if (-not $SkipFrontend) {
     }
 }
 
-# ── 8. Summary ─────────────────────────────────────────────────────────────────
+# -- 8. Summary -----------------------------------------------------------------
 Write-Host ""
 Write-Host "  ============================================================" -ForegroundColor Green
 Write-Host "   Bootstrap complete!" -ForegroundColor Green
