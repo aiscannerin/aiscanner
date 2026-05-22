@@ -2,18 +2,20 @@
 NSE Option Chain — Playwright fetcher
 =======================================
 Runs a single headless Chromium browser to fetch NSE option-chain data.
-Akamai's _abck cookie is validated automatically by the real browser JS engine.
+Akamai's _abck cookie is validated by the real browser JS engine.
 
 Design:
   • One persistent BrowserContext per server process.
   • Session warmed by visiting NSE homepage (lets Akamai JS validate cookies).
-  • Actual API calls use context.request (shares cookies with the browser page).
+  • API calls use page.goto() so Akamai sees a real browser request, not plain HTTP.
+    (context.request bypasses JS challenge validation — always returns empty data.)
   • RLock serialises all browser operations (Playwright sync API is NOT thread-safe).
   • 5-minute in-memory cache per symbol URL.
   • Auto re-warm every 25 minutes or on stale-session errors.
 """
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -103,9 +105,9 @@ def _warm():
     # 1. Visit NSE homepage — triggers Akamai JS, sets _abck cookie
     _page.goto(_BASE + "/", wait_until="domcontentloaded", timeout=30_000)
     time.sleep(_WARM_PAUSE)
-    # 2. Visit a market-data page to further validate the session
+    # 2. Visit the option-chain page — runs the JS that Akamai validates for API calls
     _page.goto(
-        _BASE + "/market-data/live-equity-market",
+        _BASE + "/option-chain",
         wait_until="domcontentloaded",
         timeout=30_000,
     )
@@ -123,41 +125,44 @@ def _ensure_ready():
         _warm()
 
 
-# ── HTTP fetch (via browser cookie jar) ──────────────────────────────────────
+# ── Browser-native fetch ──────────────────────────────────────────────────────
 
 def _fetch(url: str) -> dict:
     """
-    Make a GET request via the browser context's request API.
-    context.request shares all cookies (including _abck) with the page.
-    """
-    resp = _ctx.request.get(
-        url,
-        headers={
-            "Accept":          "application/json, text/plain, */*",
-            "Referer":         _BASE + "/",
-            "Accept-Language": "en-IN,en;q=0.9",
-        },
-        timeout=20_000,   # ms
-    )
+    Navigate the browser page directly to the NSE API URL.
 
-    if resp.status in (401, 403):
-        raise NSEFetchError(
-            f"NSE returned HTTP {resp.status} — session cookie expired, will re-warm"
-        )
-    if not resp.ok:
-        raise NSEFetchError(f"NSE HTTP {resp.status}")
+    Using page.goto() (not context.request) is critical: Akamai's _abck cookie
+    is only marked valid after the browser JS engine runs the challenge.  A plain
+    HTTP request — even with the cookie attached — returns HTTP 200 with empty /
+    fake JSON because the cookie is not JS-validated for that request path.
+    page.goto() goes through the full browser stack, so Akamai accepts it.
+    """
+    _page.goto(url, wait_until="domcontentloaded", timeout=25_000)
+
+    # The browser renders the raw JSON as a <pre> or plain body text.
+    try:
+        raw_text = _page.evaluate("() => document.body.innerText")
+    except Exception:
+        raw_text = _page.content()
+
+    if not raw_text or not raw_text.strip():
+        raise NSEFetchError("NSE returned blank page — session may need re-warming")
 
     try:
-        data = resp.json()
+        data = json.loads(raw_text)
     except Exception:
-        txt = resp.text()
-        raise NSEDataError(f"NSE returned non-JSON: {txt[:200]}")
+        snippet = raw_text[:300]
+        # HTML response means Akamai is blocking / redirecting
+        if "<html" in snippet.lower() or "<!doctype" in snippet.lower():
+            raise NSEFetchError(
+                "NSE returned HTML instead of JSON — Akamai blocked the request, will re-warm"
+            )
+        raise NSEDataError(f"NSE returned non-JSON: {snippet}")
 
-    # Akamai-blocked responses return HTTP 200 with empty JSON {}
+    # Akamai-blocked responses come back as HTTP 200 with {{}} or minimal records
     if not data or (isinstance(data, dict) and not data.get("records")):
         raise NSEFetchError(
-            "NSE returned empty data — Akamai may not have fully validated the session yet. "
-            "Retrying with a fresh session..."
+            "NSE returned empty/minimal data — Akamai session not fully validated, will re-warm"
         )
 
     return data
