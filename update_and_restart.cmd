@@ -95,8 +95,8 @@ if "!OLD_HEAD!"=="" (
 echo         Current HEAD: !OLD_HEAD!
 echo  Old HEAD: !OLD_HEAD! >> "%LOGFILE%"
 
-:: Pull
-git pull origin main >> "%LOGFILE%" 2>&1
+:: Pull (--rebase avoids the vim merge-commit prompt when histories diverge)
+git pull --rebase origin main >> "%LOGFILE%" 2>&1
 set "PULL_EXIT=!ERRORLEVEL!"
 
 if !PULL_EXIT! NEQ 0 (
