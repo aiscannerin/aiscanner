@@ -233,6 +233,7 @@ export function LoginPage() {
                 </label>
                 <button
                   type="button"
+                  tabIndex={-1}
                   onClick={() => navigate('/forgot-password')}
                   className="font-mono text-[11px] text-primary hover:text-on-surface transition-colors bg-transparent border-0 p-0 cursor-pointer"
                 >
@@ -253,6 +254,7 @@ export function LoginPage() {
                       ? '1px solid rgba(255,77,79,0.6)'
                       : '1px solid rgba(255,255,255,0.10)',
                   }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit(e) }}
                   onFocus={(e) => { if (!fieldErrors.password) e.target.style.borderColor = 'rgba(0,102,255,0.7)' }}
                   onBlur={(e)  => { if (!fieldErrors.password) e.target.style.borderColor = 'rgba(255,255,255,0.10)' }}
                 />

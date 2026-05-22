@@ -94,7 +94,7 @@ echo        Logs: %FRONTEND_DIR%\logs\frontend.log
 ::  Output is appended to logs\backend.log (both stdout and stderr).
 echo  [3/5] Starting backend  (http://localhost:%PORT_BACKEND%)...
 start "SHP-Backend-3010" /D "%BACKEND_DIR%" cmd /k ^
-    "call venv\Scripts\activate.bat && python run.py"
+    "call venv\Scripts\activate.bat && python run.py 2>&1 | powershell -noprofile -command \"$input | Tee-Object -FilePath logs\backend.log -Append\""
 echo        Backend window started.
 
 :: ── Wait for Flask to bind ───────────────────────────────────────────────────
@@ -114,7 +114,7 @@ if "!BACKEND_UP!"=="0" (
 :: ── Start frontend ────────────────────────────────────────────────────────────
 echo  [5/5] Starting frontend (http://localhost:%PORT_FRONTEND%)...
 start "SHP-Frontend-3000" /D "%FRONTEND_DIR%" cmd /k ^
-    "node node_modules\vite\bin\vite.js"
+    "node node_modules\vite\bin\vite.js 2>&1 | powershell -noprofile -command \"$input | Tee-Object -FilePath logs\frontend.log -Append\""
 echo        Frontend window started.
 
 echo.
