@@ -105,7 +105,7 @@ if !PULL_EXIT! NEQ 0 (
     echo          The server has NOT been updated.
     echo          Restarting the previous version now...
     echo.
-    echo  [FATAL] git pull failed (exit !PULL_EXIT!) - restarting old version >> "%LOGFILE%"
+    echo  [FATAL] git pull failed ^(exit !PULL_EXIT!^) - restarting old version >> "%LOGFILE%"
     goto :ABORT_AND_RESTART
 )
 
@@ -128,7 +128,7 @@ echo  [Step 3] Checking requirements.txt >> "%LOGFILE%"
 rem If OLD_HEAD == NEW_HEAD, skip (nothing changed)
 if "!OLD_HEAD!"=="!NEW_HEAD!" (
     echo         requirements.txt unchanged - skipping pip install.
-    echo  [Step 3] Skipped (no new commits) >> "%LOGFILE%"
+    echo  [Step 3] Skipped ^(no new commits^) >> "%LOGFILE%"
     goto :SKIP_PIP
 )
 
@@ -148,7 +148,7 @@ if !ERRORLEVEL! EQU 1 (
     cd /d "%PROJECT_DIR%"
 ) else (
     echo         requirements.txt unchanged - skipping pip install.
-    echo  [Step 3] Skipped (no change) >> "%LOGFILE%"
+    echo  [Step 3] Skipped ^(no change^) >> "%LOGFILE%"
 )
 :SKIP_PIP
 
@@ -158,7 +158,7 @@ echo  [Step 4] Checking package-lock.json >> "%LOGFILE%"
 
 if "!OLD_HEAD!"=="!NEW_HEAD!" (
     echo         package-lock.json unchanged - skipping npm install.
-    echo  [Step 4] Skipped (no new commits) >> "%LOGFILE%"
+    echo  [Step 4] Skipped ^(no new commits^) >> "%LOGFILE%"
     goto :SKIP_NPM
 )
 
@@ -178,7 +178,7 @@ if !ERRORLEVEL! EQU 1 (
     cd /d "%PROJECT_DIR%"
 ) else (
     echo         package-lock.json unchanged - skipping npm install.
-    echo  [Step 4] Skipped (no change) >> "%LOGFILE%"
+    echo  [Step 4] Skipped ^(no change^) >> "%LOGFILE%"
 )
 :SKIP_NPM
 
