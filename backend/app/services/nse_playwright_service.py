@@ -73,12 +73,24 @@ def _start():
             pass
 
     _pw      = sync_playwright().start()
-    _browser = _pw.firefox.launch(headless=True)
+    _browser = _pw.chromium.launch(
+        headless=True,
+        args=[
+            "--no-sandbox",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-dev-shm-usage",
+            "--ignore-certificate-errors",
+            "--ignore-ssl-errors",
+            "--disable-features=NetworkService",
+        ],
+    )
     _ctx = _browser.new_context(
         user_agent=(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) "
-            "Gecko/20100101 Firefox/125.0"
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
         ),
+        ignore_https_errors=True,
         viewport={"width": 1280, "height": 900},
         locale="en-IN",
         timezone_id="Asia/Kolkata",
@@ -95,18 +107,24 @@ def _warm():
     global _warmed, _last_warm
     logger.info("[NSE-PW] Warming NSE session (letting Akamai JS validate)...")
     # 1. Visit NSE homepage — triggers Akamai JS, sets _abck cookie
-    _page.goto(_BASE + "/", wait_until="domcontentloaded", timeout=30_000)
-    time.sleep(_WARM_PAUSE)
+    try:
+        _page.goto(_BASE + "/", wait_until="domcontentloaded", timeout=30_000)
+        time.sleep(_WARM_PAUSE)
+    except Exception as exc:
+        logger.warning("[NSE-PW] Homepage warm failed (%s) — continuing anyway", str(exc)[:100])
     # 2. Visit the option-chain page — runs the JS that Akamai validates for API calls
-    _page.goto(
-        _BASE + "/option-chain",
-        wait_until="domcontentloaded",
-        timeout=30_000,
-    )
-    time.sleep(_WARM_PAUSE)
+    try:
+        _page.goto(
+            _BASE + "/option-chain",
+            wait_until="domcontentloaded",
+            timeout=30_000,
+        )
+        time.sleep(_WARM_PAUSE)
+    except Exception as exc:
+        logger.warning("[NSE-PW] Option-chain warm failed (%s) — continuing anyway", str(exc)[:100])
     _warmed    = True
     _last_warm = time.monotonic()
-    logger.info("[NSE-PW] NSE session warmed successfully.")
+    logger.info("[NSE-PW] NSE session warm step complete.")
 
 
 def _ensure_ready():
