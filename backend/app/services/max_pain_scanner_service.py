@@ -14,6 +14,8 @@ import logging
 import time
 from typing import Optional
 
+_INTER_SYMBOL_DELAY = 0.8  # seconds between NSE fetches to avoid connection resets
+
 from app.services.nse_option_chain_service import (
     OptionChainResult,
     NSEMarketClosedError,
@@ -236,7 +238,9 @@ def run_scanner(
     below_threshold: list[str]  = []
     market_closed:   list[str]  = []
 
-    for sym in target:
+    for i, sym in enumerate(target):
+        if i > 0:
+            time.sleep(_INTER_SYMBOL_DELAY)
         try:
             result, skip_reason, error_msg = _scan_symbol_internal(sym, expiry, threshold_pct)
             if result is not None:

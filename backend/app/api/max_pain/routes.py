@@ -4,6 +4,7 @@ Data source: NSE option chain via headless Chromium (no per-user credentials nee
 """
 
 import logging
+import threading
 from datetime import datetime, timezone
 
 from flask import Blueprint, request, jsonify
@@ -30,12 +31,22 @@ logger = logging.getLogger(__name__)
 
 max_pain_bp = Blueprint("max_pain", __name__, url_prefix="/api/max-pain")
 
+# Prevents two concurrent full-universe scans from colliding on the shared browser page
+_scan_lock = threading.Lock()
+
 
 # ── /scan ─────────────────────────────────────────────────────────────────────
 
 @max_pain_bp.route("/scan", methods=["GET"])
 @jwt_required()
 def scan():
+    if not _scan_lock.acquire(blocking=False):
+        # A scan is already running — return the latest snapshot immediately
+        logger.info("[SCAN /scan] Scan already in progress, returning cached snapshot")
+        snapshot = get_latest_snapshot()
+        if snapshot:
+            return jsonify({**snapshot, "using_snapshot": True, "snapshot_reason": "scan_in_progress"}), 200
+        return jsonify({"error": "Scan already in progress, please try again shortly"}), 429
     try:
         threshold     = float(request.args.get("threshold", 2.0))
         symbols_param = request.args.get("symbols", "")
@@ -157,6 +168,8 @@ def scan():
     except Exception as exc:
         logger.error("[SCAN /scan] Unexpected error: %s", exc, exc_info=True)
         return jsonify({"success": False, "error": str(exc)}), 500
+    finally:
+        _scan_lock.release()
 
 
 # ── /symbol/<symbol> ──────────────────────────────────────────────────────────
