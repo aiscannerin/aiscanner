@@ -1,17 +1,16 @@
 """
-NSE Option Chain — Playwright fetcher
-=======================================
-Runs a single headless Chromium browser to fetch NSE option-chain data.
-Akamai's _abck cookie is validated by the real browser JS engine.
+NSE Option Chain — requests-based fetcher
+==========================================
+Uses Python requests (HTTP/1.1) instead of Playwright/Chromium.
+Playwright's HTTP/2 causes ERR_HTTP2_PROTOCOL_ERROR on Windows Server
+with Hyper-V virtual network adapters — requests bypasses this entirely.
 
 Design:
-  • One persistent BrowserContext per server process.
-  • Session warmed by visiting NSE homepage (lets Akamai JS validate cookies).
-  • API calls use page.goto() so Akamai sees a real browser request, not plain HTTP.
-    (context.request bypasses JS challenge validation — always returns empty data.)
-  • RLock serialises all browser operations (Playwright sync API is NOT thread-safe).
+  • Single persistent requests.Session per process (reuses cookies).
+  • Session warmed by visiting NSE homepage + option-chain page.
+  • RLock serialises all requests (session is not thread-safe for concurrent use).
   • 5-minute in-memory cache per symbol URL.
-  • Auto re-warm every 25 minutes or on stale-session errors.
+  • Auto re-warm every 25 minutes or on fetch errors.
 """
 from __future__ import annotations
 
@@ -21,6 +20,9 @@ import threading
 import time
 from datetime import datetime, timezone
 from typing import Optional
+
+import requests
+import urllib3
 
 from app.services.nse_option_chain_service import (
     OptionChainResult,
@@ -33,6 +35,9 @@ from app.services.nse_option_chain_service import (
     _safe_int,
 )
 
+# Suppress SSL warnings (NSE cert chain can be noisy on Windows Server)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 logger = logging.getLogger(__name__)
 
 _BASE       = "https://www.nseindia.com"
@@ -44,149 +49,113 @@ _INDEX_SYMS = frozenset({
     "NIFTYNXT50", "SENSEX",
 })
 
-_CACHE_TTL      = 300       # 5 minutes per symbol
-_SESSION_TTL    = 25 * 60   # re-warm session every 25 min
-_WARM_PAUSE     = 3         # seconds to pause after each NSE page load
+_CACHE_TTL   = 300       # 5 minutes per symbol
+_SESSION_TTL = 25 * 60   # re-warm session every 25 min
+_WARM_PAUSE  = 2         # seconds to pause after each NSE page load
 
 _lock      = threading.RLock()
-_pw        = None
-_browser   = None
-_ctx       = None
-_page      = None
+_session:  Optional[requests.Session] = None
 _warmed    = False
 _last_warm = 0.0
 
 _cache: dict[str, tuple[dict, float]] = {}
 
+_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept":          "*/*",
+    "Accept-Language": "en-IN,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Referer":         "https://www.nseindia.com/option-chain",
+    "Connection":      "keep-alive",
+}
 
-# ── Browser lifecycle ─────────────────────────────────────────────────────────
+
+# ── Session lifecycle ─────────────────────────────────────────────────────────
 
 def _start():
-    global _pw, _browser, _ctx, _page, _warmed, _last_warm
-    from playwright.sync_api import sync_playwright
-
-    logger.info("[NSE-PW] Launching Chromium headless browser...")
-    if _pw:
+    global _session, _warmed, _last_warm
+    logger.info("[NSE-REQ] Creating new requests session...")
+    if _session:
         try:
-            _pw.stop()
+            _session.close()
         except Exception:
             pass
-
-    _pw      = sync_playwright().start()
-    _browser = _pw.chromium.launch(
-        headless=True,
-        args=[
-            "--no-sandbox",
-            "--disable-blink-features=AutomationControlled",
-            "--disable-dev-shm-usage",
-            "--ignore-certificate-errors",
-            "--ignore-ssl-errors",
-            "--disable-features=NetworkService",
-        ],
-    )
-    _ctx = _browser.new_context(
-        user_agent=(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        ),
-        ignore_https_errors=True,
-        viewport={"width": 1280, "height": 900},
-        locale="en-IN",
-        timezone_id="Asia/Kolkata",
-        extra_http_headers={
-            "Accept-Language": "en-IN,en;q=0.9",
-        },
-    )
-    _page   = _ctx.new_page()
+    _session = requests.Session()
+    _session.headers.update(_HEADERS)
+    _session.verify = False
     _warmed = False
-    logger.info("[NSE-PW] Chromium started.")
+    logger.info("[NSE-REQ] Session created.")
 
 
 def _warm():
     global _warmed, _last_warm
-    logger.info("[NSE-PW] Warming NSE session (letting Akamai JS validate)...")
-    # 1. Visit NSE homepage — triggers Akamai JS, sets _abck cookie
+    logger.info("[NSE-REQ] Warming NSE session (acquiring Akamai cookies)...")
     try:
-        _page.goto(_BASE + "/", wait_until="domcontentloaded", timeout=30_000)
+        _session.get(_BASE + "/", timeout=15)
         time.sleep(_WARM_PAUSE)
     except Exception as exc:
-        logger.warning("[NSE-PW] Homepage warm failed (%s) — continuing anyway", str(exc)[:100])
-    # 2. Visit the option-chain page — runs the JS that Akamai validates for API calls
+        logger.warning("[NSE-REQ] Homepage warm failed (%s) — continuing anyway", str(exc)[:100])
     try:
-        _page.goto(
-            _BASE + "/option-chain",
-            wait_until="domcontentloaded",
-            timeout=30_000,
-        )
+        _session.get(_BASE + "/option-chain", timeout=15)
         time.sleep(_WARM_PAUSE)
     except Exception as exc:
-        logger.warning("[NSE-PW] Option-chain warm failed (%s) — continuing anyway", str(exc)[:100])
+        logger.warning("[NSE-REQ] Option-chain warm failed (%s) — continuing anyway", str(exc)[:100])
     _warmed    = True
     _last_warm = time.monotonic()
-    logger.info("[NSE-PW] NSE session warm step complete.")
+    logger.info("[NSE-REQ] NSE session warm complete.")
 
 
 def _ensure_ready():
-    """Start browser and/or re-warm session if needed. MUST be called inside _lock."""
-    if _browser is None or not _browser.is_connected():
+    """Start session and/or re-warm if needed. MUST be called inside _lock."""
+    if _session is None:
         _start()
     if not _warmed or (time.monotonic() - _last_warm) > _SESSION_TTL:
         _warm()
 
 
-# ── Browser-native fetch ──────────────────────────────────────────────────────
+# ── Fetch ─────────────────────────────────────────────────────────────────────
 
 def _fetch(url: str) -> dict:
-    """
-    Navigate the browser page directly to the NSE API URL.
+    resp = _session.get(url, timeout=20)
 
-    Using page.goto() (not context.request) is critical: Akamai's _abck cookie
-    is only marked valid after the browser JS engine runs the challenge.  A plain
-    HTTP request — even with the cookie attached — returns HTTP 200 with empty /
-    fake JSON because the cookie is not JS-validated for that request path.
-    page.goto() goes through the full browser stack, so Akamai accepts it.
-    """
-    _page.goto(url, wait_until="domcontentloaded", timeout=25_000)
+    if resp.status_code == 401 or resp.status_code == 403:
+        raise NSEFetchError(f"NSE returned {resp.status_code} — session blocked, will re-warm")
 
-    # The browser renders the raw JSON as a <pre> or plain body text.
-    try:
-        raw_text = _page.evaluate("() => document.body.innerText")
-    except Exception:
-        raw_text = _page.content()
+    if resp.status_code != 200:
+        raise NSEFetchError(f"NSE returned HTTP {resp.status_code}")
 
-    if not raw_text or not raw_text.strip():
-        raise NSEFetchError("NSE returned blank page — session may need re-warming")
+    content_type = resp.headers.get("Content-Type", "")
+    raw_text = resp.text.strip()
+
+    if not raw_text:
+        raise NSEFetchError("NSE returned blank response — session may need re-warming")
+
+    if "text/html" in content_type or raw_text.lower().startswith("<!doctype") or raw_text.lower().startswith("<html"):
+        raise NSEFetchError("NSE returned HTML instead of JSON — Akamai blocked, will re-warm")
 
     try:
         data = json.loads(raw_text)
     except Exception:
         snippet = raw_text[:300]
-        # HTML response means Akamai is blocking / redirecting
-        if "<html" in snippet.lower() or "<!doctype" in snippet.lower():
-            raise NSEFetchError(
-                "NSE returned HTML instead of JSON — Akamai blocked the request, will re-warm"
-            )
         raise NSEDataError(f"NSE returned non-JSON: {snippet}")
 
-    # Akamai-blocked responses come back as HTTP 200 with {{}} or minimal records
     if not data or (isinstance(data, dict) and not data.get("records")):
-        raise NSEFetchError(
-            "NSE returned empty/minimal data — Akamai session not fully validated, will re-warm"
-        )
+        raise NSEFetchError("NSE returned empty/minimal data — Akamai session not validated, will re-warm")
 
     return data
 
 
 def _get_raw(url: str) -> dict:
     """Return cached JSON, or fetch fresh with one retry on session failure."""
-    # Fast path: check cache without lock
     cached = _cache.get(url)
     if cached and (time.monotonic() - cached[1]) < _CACHE_TTL:
         return cached[0]
 
     with _lock:
-        # Double-check inside lock (another thread may have just populated it)
         cached = _cache.get(url)
         if cached and (time.monotonic() - cached[1]) < _CACHE_TTL:
             return cached[0]
@@ -196,10 +165,7 @@ def _get_raw(url: str) -> dict:
         try:
             data = _fetch(url)
         except Exception as exc:
-            # Any navigation error (NS_ERROR_NET_RESET, HTTP2 error, NSEFetchError)
-            # means Akamai killed the session — re-warm once and retry
-            err_str = str(exc)
-            logger.warning("[NSE-PW] Fetch failed (%s); re-warming and retrying...", err_str[:120])
+            logger.warning("[NSE-REQ] Fetch failed (%s); re-warming and retrying...", str(exc)[:120])
             time.sleep(2)
             _warm()
             time.sleep(1)
@@ -223,7 +189,6 @@ def _parse(data: dict, symbol: str, expiry: Optional[str]) -> OptionChainResult:
 
     rows_raw = records.get("data") or []
 
-    # Pick expiry
     if expiry and expiry in all_expiries:
         chosen = expiry
     else:
@@ -306,20 +271,17 @@ def _oc_url(symbol: str) -> str:
 
 
 def get_expiries(symbol: str) -> list[str]:
-    """Return all expiry date strings for symbol (nearest first)."""
     data = _get_raw(_oc_url(symbol))
     return (data.get("records") or {}).get("expiryDates") or []
 
 
 def get_option_chain(symbol: str, expiry: Optional[str] = None) -> OptionChainResult:
-    """Fetch full option chain from NSE via headless browser. Returns OptionChainResult."""
     symbol = symbol.upper().strip()
     data   = _get_raw(_oc_url(symbol))
     return _parse(data, symbol, expiry)
 
 
 def invalidate_cache(symbol: str = None):
-    """Clear cache entry for one symbol, or all entries if symbol is None."""
     with _lock:
         if symbol:
             _cache.pop(_oc_url(symbol), None)
@@ -328,23 +290,16 @@ def invalidate_cache(symbol: str = None):
 
 
 def is_ready() -> bool:
-    """True if the browser is running and the session has been warmed."""
-    return _browser is not None and _browser.is_connected() and _warmed
+    return _session is not None and _warmed
 
 
 def shutdown():
-    """Cleanly close the browser. Call on app teardown."""
-    global _browser, _pw, _warmed
+    global _session, _warmed
     with _lock:
-        if _browser:
+        if _session:
             try:
-                _browser.close()
-            except Exception:
-                pass
-        if _pw:
-            try:
-                _pw.stop()
+                _session.close()
             except Exception:
                 pass
         _warmed = False
-    logger.info("[NSE-PW] Browser shut down.")
+    logger.info("[NSE-REQ] Session closed.")
