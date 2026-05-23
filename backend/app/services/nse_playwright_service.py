@@ -79,7 +79,8 @@ def _start():
             "--no-sandbox",
             "--disable-blink-features=AutomationControlled",
             "--disable-dev-shm-usage",
-            "--disable-http2",
+            "--disable-features=NetworkService",
+            "--ignore-certificate-errors",
         ],
     )
     _ctx = _browser.new_context(
