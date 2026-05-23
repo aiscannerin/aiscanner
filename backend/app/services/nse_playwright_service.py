@@ -73,21 +73,11 @@ def _start():
             pass
 
     _pw      = sync_playwright().start()
-    _browser = _pw.chromium.launch(
-        headless=True,
-        args=[
-            "--no-sandbox",
-            "--disable-blink-features=AutomationControlled",
-            "--disable-dev-shm-usage",
-            "--disable-features=NetworkService",
-            "--ignore-certificate-errors",
-        ],
-    )
+    _browser = _pw.firefox.launch(headless=True)
     _ctx = _browser.new_context(
         user_agent=(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) "
+            "Gecko/20100101 Firefox/125.0"
         ),
         viewport={"width": 1280, "height": 900},
         locale="en-IN",

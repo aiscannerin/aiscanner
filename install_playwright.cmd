@@ -50,9 +50,9 @@ if errorlevel 1 (
 )
 echo.
 
-rem -- Install Chromium browser binaries
-echo [2/3] Downloading Chromium browser binaries (may take a few minutes)...
-python -m playwright install chromium
+rem -- Install Firefox browser binaries
+echo [2/3] Downloading Firefox browser binaries (may take a few minutes)...
+python -m playwright install firefox
 if errorlevel 1 (
     echo ERROR: Chromium install failed.
     echo        Check internet access or try running as Administrator.
