@@ -177,10 +177,14 @@ def _get_raw(url: str) -> dict:
 
         try:
             data = _fetch(url)
-        except NSEFetchError:
-            # Session may have expired — re-warm once and retry
-            logger.warning("[NSE-PW] Fetch failed; re-warming session and retrying...")
+        except Exception as exc:
+            # Any navigation error (NS_ERROR_NET_RESET, HTTP2 error, NSEFetchError)
+            # means Akamai killed the session — re-warm once and retry
+            err_str = str(exc)
+            logger.warning("[NSE-PW] Fetch failed (%s); re-warming and retrying...", err_str[:120])
+            time.sleep(2)
             _warm()
+            time.sleep(1)
             data = _fetch(url)
 
         _cache[url] = (data, time.monotonic())
